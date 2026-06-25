@@ -1,0 +1,46 @@
+# Flow 项目自适应规范（L2 项目回路的记忆载体）
+#
+# 这是"项目特化"层：由 `flow profile` (profiler 子代理) 从代码库 + CI 自举，
+# 首次必须人审后启用。kernel 用扁平点号键解析（无 YAML 依赖）。
+#
+# ⚠️ Oracle 正确性是 L1 全程的承重点：commands.* 错误会毒化整个循环。
+#    优先填 CI 真正执行的命令（最可靠）。
+#
+# ── 本文件当前为示例骨架；请用 `flow profile` 重新自举或手工校正 ──
+
+profile.ready: false           # 人审通过后改为 true，否则 loop-start 拒绝进循环
+
+# ── 语言 / 框架 ──
+languages: ""                  # 例: typescript,go
+frameworks: ""                 # 例: react,gin
+
+# ── 模块边界（供 rubric "影响面" 粒度）──
+module_boundaries: ""          # 例: apps/web,services/auth（逗号分隔）
+
+# ── 分级命令（供 L1 Oracle 与 self-test 复用）──
+# 留空表示该命令在本项目不存在；缺失会触发 Oracle 降级链。
+commands.build: ""             # 例: pnpm build
+commands.lint: ""              # 例: pnpm lint
+commands.smoke: ""             # 例: pnpm build && pnpm test:unit --filter changed
+commands.unit: ""              # 例: pnpm test:unit
+commands.integ: ""            # 例: pnpm test:integration
+commands.e2e: ""               # 例: pnpm test:e2e
+
+# ── 各 tier 的 Oracle 由哪些命令拼装（空格分隔的命令键）──
+# loop-start 取这些键 → 查 commands.<key> → 以 " && " 串联为 verify_command。
+oracle.R0: smoke
+oracle.R1: build unit
+oracle.R2: build unit integ
+oracle.R3: build unit integ e2e
+
+# ── 约定 ──
+conventions.naming: ""         # 例: camelCase 文件，PascalCase 组件
+conventions.test_style: ""     # 例: vitest + testing-library
+conventions.doc_lang: zh-CN    # 交付物语言
+
+# ── 反模式语言包（懒加载，见 .flow/refs/antipatterns.md）──
+antipattern_packs: ""          # 例: typescript,react
+
+# ── 字段元数据（置信度 + 最后验证日期，用于老化降权）──
+# 形如 field_meta.commands.integ: 0.6|2026-06-20
+field_meta.commands.integ: ""

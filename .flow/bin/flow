@@ -1,0 +1,197 @@
+#!/bin/bash
+# Flow CLI —— 编排 agent 显式调用的控制动作。
+#   flow tier  <R0|R1|R2|R3> [--change <id>] [--next "假设"]
+#   flow loop-start --change <id> --tier <R> [--verify "cmd"] [--promise TAG]
+#   flow loop-stop
+#   flow loop-status
+#   flow profile-check
+set -u
+SELF=$(cd "$(dirname "$0")" && pwd)
+. "$SELF/../kernel/lib.sh"
+
+FLOW_ROOT=$(flow_find_root "$PWD") || { echo "flow: 不在 Flow 项目内（找不到 .flow）" >&2; exit 2; }
+export FLOW_ROOT
+hash=$(flow_cwd_hash "$PWD")
+RUNDIR="$FLOW_ROOT/.flow/runs/$hash"
+STATE="$RUNDIR/state.json"
+LOOP="$RUNDIR/loop.yml"
+mkdir -p "$RUNDIR"
+
+die() { echo "flow: $*" >&2; exit 1; }
+
+state_set() { # key value(json-raw via jq filter)
+  local tmp="$STATE.tmp.$$"
+  [ -f "$STATE" ] || echo '{}' > "$STATE"
+  jq "$1" "$STATE" > "$tmp" && mv "$tmp" "$STATE"
+}
+
+cmd="${1:-help}"; shift 2>/dev/null || true
+
+case "$cmd" in
+  tier)
+    tier="${1:-}"; shift 2>/dev/null || true
+    case "$tier" in R0|R1|R2|R3) ;; *) die "用法: flow tier <R0|R1|R2|R3> [--change id] [--next 假设]";; esac
+    change=""; next=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --change) change="$2"; shift 2;; --next) next="$2"; shift 2;; *) shift;; esac; done
+    state_set ".tier=\"$tier\" | .updated_at=\"$(flow_now_iso)\""
+    [ -n "$change" ] && state_set ".change_id=\"$change\""
+    [ -n "$next" ] && state_set ".next_hypothesis=\"$next\""
+    echo "flow: 本 run tier=$tier${change:+ change=$change}"
+    ;;
+
+  loop-start)
+    change=""; tier=""; verify=""; promise=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --change) change="$2"; shift 2;; --tier) tier="$2"; shift 2;;
+      --verify) verify="$2"; shift 2;; --promise) promise="$2"; shift 2;;
+      *) shift;; esac; done
+    [ -z "$tier" ] && tier=$(jq -r '.tier // ""' "$STATE" 2>/dev/null)
+    case "$tier" in R0|R1|R2|R3) ;; *) die "需要 --tier 或先 flow tier";; esac
+    [ -z "$change" ] && change=$(jq -r '.change_id // ""' "$STATE" 2>/dev/null)
+    [ -z "$promise" ] && { promise=$(cfg_get oracle.promise_tag); [ -z "$promise" ] && promise=FLOW_DONE; }
+
+    loopflag=$(cfg_get "tier.$tier.loop")
+    [ "$loopflag" = "true" ] || die "tier $tier 不进 Oracle 循环（config: tier.$tier.loop=${loopflag}）。直执或人类 gate。"
+    max=$(cfg_get "tier.$tier.max_iterations"); [ -z "$max" ] && max=10
+
+    # 装配 Oracle（来源受控：仅来自人审 profile）。--verify 仅供测试/特例。
+    if [ -z "$verify" ]; then
+      [ "$(prof_get profile.ready)" = "true" ] || die "profile 未就绪（profile.ready!=true，需人审）。先 flow profile 自举并人审，或 --verify 显式给定。"
+      keys=$(prof_get "oracle.$tier")
+      [ -z "$keys" ] && die "profile 未定义 oracle.${tier}，无可用 Oracle → 退回人类 gate（或 #no-loop）。"
+      for kk in $keys; do
+        c=$(prof_get "commands.$kk")
+        [ -z "$c" ] && continue
+        if [ -z "$verify" ]; then verify="$c"; else verify="$verify && $c"; fi
+      done
+      [ -z "$verify" ] && die "oracle.$tier 引用的命令在 commands.* 全为空 → 无可用 Oracle，退回人类 gate。"
+    fi
+
+    : > "$LOOP"
+    yset "$LOOP" active true
+    yset "$LOOP" change_id "$change"
+    yset "$LOOP" tier "$tier"
+    yset "$LOOP" iteration 1
+    yset "$LOOP" max_iterations "$max"
+    yset "$LOOP" promise_rejections 0
+    yset "$LOOP" completion_promise "$promise"
+    yset "$LOOP" verify_command "$verify"
+    yset "$LOOP" session_id ""
+    yset "$LOOP" started_at "$(flow_now_iso)"
+    yset "$LOOP" started_epoch "$(flow_now_epoch)"
+    yset "$LOOP" stall_count 0
+    yset "$LOOP" last_sig ""
+    jq -cn --arg ts "$(flow_now_iso)" --arg ch "$change" --arg t "$tier" --arg v "$verify" \
+      '{iteration:1,status:"init",change_id:$ch,tier:$t,verify:$v,timestamp:$ts}' >> "$RUNDIR/loop-history.jsonl"
+    state_set ".tier=\"$tier\" | .change_id=\"$change\" | .active_loop=true | .updated_at=\"$(flow_now_iso)\""
+    echo "flow: Oracle 循环已启动 · tier=$tier · max=$max · change=${change:-?}"
+    echo "      verify = $verify"
+    echo "      完成后发 <promise>$promise</promise>；放弃用 <flow-abort>原因</flow-abort>；暂停用 <flow-pause>。"
+    ;;
+
+  loop-stop)
+    if [ -f "$LOOP" ]; then yset "$LOOP" active false; echo "flow: 循环已停止。"; else echo "flow: 无活跃循环。"; fi
+    ;;
+
+  loop-status)
+    if [ -f "$LOOP" ]; then
+      echo "── loop.yml ──"; cat "$LOOP"
+      echo "── 最近历史 ──"; tail -n 8 "$RUNDIR/loop-history.jsonl" 2>/dev/null
+    else echo "flow: 无活跃循环（${RUNDIR}）。"; fi
+    ;;
+
+  profile-check)
+    p="$FLOW_ROOT/.flow/profile.yml"
+    echo "profile.ready = $(yget "$p" profile.ready)"
+    for t in R0 R1 R2 R3; do
+      keys=$(yget "$p" "oracle.$t"); v=""
+      for kk in $keys; do c=$(yget "$p" "commands.$kk"); [ -n "$c" ] && { [ -z "$v" ] && v="$c" || v="$v && $c"; }; done
+      echo "oracle.$t -> ${v:-（空 → 该 tier 退回人类 gate）}"
+    done
+    ;;
+
+  profile-init)
+    # 自动探测项目的构建/测试命令，生成 profile.yml（无需 agent、无需手填）。
+    P="$FLOW_ROOT/.flow/profile.yml"
+    root="$FLOW_ROOT"
+    has(){ [ -e "$root/$1" ]; }
+    B=""; U=""; I=""; E=""; LT=""; SM=""; LANGS=""; PACKS=""
+    add_lang(){ case " $LANGS " in *" $1 "*) ;; *) LANGS="${LANGS:+$LANGS,}$1";; esac; }
+    add_pack(){ case " $PACKS " in *" $1 "*) ;; *) PACKS="${PACKS:+$PACKS,}$1";; esac; }
+
+    # ── Node/TS ──
+    if has package.json; then
+      add_lang javascript
+      if grep -q '"typescript"' "$root/package.json" 2>/dev/null || has tsconfig.json; then add_lang typescript; add_pack typescript; else add_pack javascript; fi
+      grep -q '"react"' "$root/package.json" 2>/dev/null && add_pack react
+      PM=npm
+      has pnpm-lock.yaml && PM=pnpm; has yarn.lock && PM=yarn; has bun.lockb && PM=bun
+      sc(){ jq -r --arg k "$1" '.scripts[$k] // empty' "$root/package.json" 2>/dev/null; }
+      [ -n "$(sc build)" ] && B="$PM run build"
+      if   [ -n "$(sc test:unit)" ]; then U="$PM run test:unit"
+      elif [ -n "$(sc test)" ];      then U="$PM test"; fi
+      [ -n "$(sc test:integration)" ] && I="$PM run test:integration"
+      [ -z "$I" ] && [ -n "$(sc test:integ)" ] && I="$PM run test:integ"
+      [ -n "$(sc test:e2e)" ] && E="$PM run test:e2e"
+      [ -z "$E" ] && [ -n "$(sc e2e)" ] && E="$PM run e2e"
+      [ -n "$(sc lint)" ] && LT="$PM run lint"
+    fi
+    # ── Rust ──
+    if has Cargo.toml; then add_lang rust; add_pack rust
+      [ -z "$B" ] && B="cargo build"; [ -z "$U" ] && U="cargo test"; [ -z "$LT" ] && LT="cargo clippy"
+    fi
+    # ── Go ──
+    if has go.mod; then add_lang go; add_pack go
+      [ -z "$B" ] && B="go build ./..."; [ -z "$U" ] && U="go test ./..."; [ -z "$LT" ] && LT="go vet ./..."
+    fi
+    # ── Python ──
+    if has pyproject.toml || has setup.py || has requirements.txt; then add_lang python; add_pack python
+      [ -z "$U" ] && U="pytest"
+    fi
+    # ── Makefile 兜底 ──
+    if has Makefile; then
+      grep -q '^build:' "$root/Makefile" 2>/dev/null && [ -z "$B" ] && B="make build"
+      grep -q '^test:'  "$root/Makefile" 2>/dev/null && [ -z "$U" ] && U="make test"
+      grep -q '^lint:'  "$root/Makefile" 2>/dev/null && [ -z "$LT" ] && LT="make lint"
+    fi
+    # smoke：构建 + 单测（有什么用什么）
+    if [ -n "$B" ] && [ -n "$U" ]; then SM="$B && $U"; elif [ -n "$B" ]; then SM="$B"; elif [ -n "$U" ]; then SM="$U"; fi
+    # 模块边界：常见源码顶层目录
+    BND=""
+    for d in src app apps lib libs packages services cmd internal pkg modules; do
+      has "$d" && BND="${BND:+$BND,}$d"
+    done
+    # 交付物语言：保留既有，默认 zh-CN
+    DL=$(yget "$P" conventions.doc_lang); [ -z "$DL" ] && DL=zh-CN
+    READY=false; { [ -n "$B" ] || [ -n "$U" ]; } && READY=true
+
+    {
+      echo "# Flow 项目自适应规范（由 flow profile-init 自动探测；可手工校正）"
+      echo "profile.ready: $READY"
+      echo "languages: $LANGS"
+      echo "module_boundaries: $BND"
+      echo "commands.build: $B"
+      echo "commands.lint: $LT"
+      echo "commands.smoke: $SM"
+      echo "commands.unit: $U"
+      echo "commands.integ: $I"
+      echo "commands.e2e: $E"
+      echo "oracle.R0: smoke"
+      echo "oracle.R1: build unit"
+      echo "oracle.R2: build unit integ"
+      echo "oracle.R3: build unit integ e2e"
+      echo "conventions.doc_lang: $DL"
+      echo "antipattern_packs: $PACKS"
+    } > "$P"
+
+    echo "flow: 已生成 profile.yml（ready=${READY}）"
+    echo "  languages = ${LANGS:-未识别}"
+    echo "  build=${B:-—}  unit=${U:-—}  integ=${I:-—}  e2e=${E:-—}"
+    [ "$READY" = false ] && echo "  ⚠ 未探测到 build/unit，已置 ready=false；请手填 commands.* 后改 profile.ready: true。"
+    ;;
+
+  help|*)
+    sed -n '2,9p' "$SELF/flow"
+    ;;
+esac

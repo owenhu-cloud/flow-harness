@@ -1,0 +1,42 @@
+# 反模式目录（懒加载 · 按 profile.antipattern_packs 选用 · 部分由 lessons 自动喂养）
+
+> verifier 对照本目录扫描实现。发现新反模式 → 在 runs/<id>/lesson.candidate.md 提议，
+> 经 harvest 晋升后由维护者追加到对应分区。
+
+## 通用（语言无关）
+
+- 删/改测试或断言以「变绿」（违反契约 §1，最严重）。
+- 吞异常：`catch {}` 空块、吞掉错误不上报。
+- 把 agent 执行流水当文档交付给人。
+- 「完成」无证据：未跑构建/测试就声明完成。
+- 边界未覆盖：空值、超大输入、特殊字符、权限不足、并发竞态。
+- 错误路径未测：只测 happy path。
+- 隐藏假设：依赖未验证的版本/路径/环境，未 tool 确认。
+- 配置漂移：改了一处配置，未核对相关配置一致性。
+
+## typescript / javascript（pack: typescript）
+
+- `any` 滥用消解类型检查；`as` 强制断言绕过编译器。
+- 漏 `await`，promise 未处理；浮动 promise。
+- `==` 与 `!=`（应 `===`）；`==null` 例外需注释。
+- 在 React 渲染期产生副作用；useEffect 依赖数组不全。
+- 直接改 props/state 而非不可变更新。
+
+## go（pack: go）
+
+- 忽略 `err`（`_ = err` 或不检查返回的 error）。
+- goroutine 泄漏：启动未设退出路径；channel 无关闭方。
+- 在循环里捕获循环变量（旧版 Go）。
+- `defer` 在循环中累积导致资源迟释放。
+
+## python（pack: python）
+
+- 裸 `except:` 吞所有异常。
+- 可变默认参数 `def f(x=[])`。
+- 未关闭文件/连接（应 `with`）。
+
+## react（pack: react）
+
+- key 用数组下标导致列表 diff 错乱。
+- 巨型组件无拆分；渲染期重计算未 memo。
+- 受控/非受控混用。

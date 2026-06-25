@@ -1,0 +1,39 @@
+# Flow 框架配置（控制平面读取）
+# 采用扁平点号键，便于 bash 无依赖解析（grep/sed）。
+# 这是"通用契约"的一部分，全项目共用；项目特化在 .flow/profile.yml。
+
+# ── 复杂度路由阈值（rubric 四维 0-3，总分 → tier）──
+route.R0.max_score: 1     # 0-1
+route.R1.max_score: 4     # 2-4
+route.R2.max_score: 8     # 5-8
+route.R3.max_score: 12    # 9-12
+
+# ── 各 tier 的 L1 循环预算 ──
+# loop=false 表示该 tier 不进 Oracle 闭环（退回直执/人类 gate）
+tier.R0.loop: false
+tier.R0.max_iterations: 1
+tier.R1.loop: true
+tier.R1.max_iterations: 5
+tier.R2.loop: true
+tier.R2.max_iterations: 10
+tier.R3.loop: true
+tier.R3.max_iterations: 10
+
+# ── Oracle 闭环参数 ──
+oracle.verify_timeout: 600     # 单次 verify 命令超时（秒）
+oracle.promise_tag: FLOW_DONE  # <promise>FLOW_DONE</promise> 触发 Oracle 裁决
+
+# ── 循环守护 ──
+loop.stale_seconds: 3600       # loop.yml 超过此时长视为孤儿，回收
+loop.history_tail: 8           # 重喂时附带的历史行数
+
+# ── 经验召回 ──
+lessons.recall_k: 3            # router 注入的相关 lesson 条数上限
+
+# ── harvest 触发信号（任一命中即在 run 末尾蒸馏候选 lesson）──
+harvest.on_escalation: 3       # 失败升维 >= N
+harvest.on_rejections: 3       # Oracle 拒绝 >= N
+harvest.on_handoff: true       # 循环到上限移交
+harvest.on_rework: true        # 发生返工
+harvest.on_override: true      # 人工覆盖了 tier
+harvest.on_real_bug: true      # verifier 发现真 bug
