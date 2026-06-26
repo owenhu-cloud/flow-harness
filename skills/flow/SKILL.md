@@ -57,9 +57,15 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 | `diagram` | 交付需要架构/流程/状态/数据图 | R2 R3 |
 | `document` | 给人看的交付物（结论+取舍+图，非流水账） | R1 R2 R3 |
 | `harvest` | 撞上学习信号（连败/移交/返工/真 bug）时沉淀经验 | R1 R2 R3 |
+| `systematic-debugging` | 调试/修 bug 卡住，四阶段根因调试（无根因不提修复） | R1 R2 R3 |
+| `code-review` | implement 后、交付前，派独立 reviewer 子代理评审并处理反馈 | R2 R3 |
+| `subagent-driven-development` | 一串任务逐个派 fresh 子代理 + 双评审（多任务编排外壳） | R2 R3 |
+| `finishing-a-development-branch` | change 收尾：合并 / PR / 丢弃决策，先过 verify+Oracle | R1 R2 R3 |
 | `writing-skills` | 要新增/修改一支 Flow 技能 | — |
 
 技能之间靠正文里的「下一步去 X 技能」显式交接。每支技能只在被加载时进主上下文，主线程保持干净。
+
+**按需技能（不改判档，卡到/到点才插入）**：调试卡住 → `systematic-debugging`；交付前要独立评审 → `code-review`（与 implement 的对抗 verifier 互补）；R2/R3 一串任务要逐个隔离派发 → `subagent-driven-development`；change 收尾合并/PR/丢弃 → `finishing-a-development-branch`。
 
 ## 质量红线（所有技能共享，不靠自律靠纪律）
 
@@ -86,6 +92,8 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 - **禁止把执行流水账当文档交付**——「我先…然后…接着…」是过程，不是产物。
 
 ## 卡住时升维（同一问题连续失败才触发，不在第一次）
+
+> 调试卡住优先**用 `Skill` 工具加载 `systematic-debugging`** 做四阶段根因调试（无根因不提修复）；下表是其压缩版升维阶梯，供主线程快速参照。
 
 | 连败次数 | 动作 |
 |---|---|

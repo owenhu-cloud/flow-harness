@@ -38,6 +38,12 @@ has "$out" '地板'; ok $? "reinject 大写 'Deploy/Production' → 地板"
 out=$(printf '{"prompt":"please drop table users"}' | sh "$RE")
 has "$out" '地板'; ok $? "reinject 'drop table' → 地板"
 
+# 与 flow 地板表对齐：CI/CD、资金、回填 也须命中（修 doc/impl 漂移）
+out=$(printf '{"prompt":"update the CI/CD pipeline config"}' | sh "$RE")
+has "$out" '地板'; ok $? "reinject 'CI/CD pipeline' → 地板"
+out=$(printf '{"prompt":"做一次资金对账的数据回填"}' | sh "$RE")
+has "$out" '地板'; ok $? "reinject '资金/回填' → 地板"
+
 # 子串噪声（已知、文档化、nudge-only 低害）
 out=$(printf '{"prompt":"build a tokenizer module"}' | sh "$RE")
 has "$out" '地板'; ok $? "reinject 子串噪声 'tokenizer'→地板（已知低害）"

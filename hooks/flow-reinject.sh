@@ -16,7 +16,7 @@ esac
 INPUT_LC=$(printf '%s' "$INPUT" | tr 'A-Z' 'a-z')
 FLOOR=''
 case "$INPUT_LC" in
-  *migration*|*migrate*|*schema*|*rollback*|*'drop table'*|*'delete from'*|*truncate*|*authn*|*authz*|*oauth*|*rbac*|*privilege*|*revoke*|*credential*|*password*|*secret*|*token*|*deploy*|*release*|*payment*|*billing*|*production*|*迁移*|*鉴权*|*认证*|*权限*|*密钥*|*发布*|*部署*|*支付*|*计费*|*生产*)
+  *migration*|*migrate*|*schema*|*rollback*|*'drop table'*|*'delete from'*|*truncate*|*backfill*|*authn*|*authz*|*oauth*|*rbac*|*privilege*|*revoke*|*credential*|*password*|*secret*|*token*|*deploy*|*release*|*'ci/cd'*|*cicd*|*pipeline*|*payment*|*billing*|*production*|*迁移*|*回填*|*鉴权*|*认证*|*权限*|*密钥*|*发布*|*部署*|*支付*|*计费*|*资金*|*生产*)
     FLOOR='命中敏感面（迁移/schema/破坏性SQL/认证/权限/密钥/CI 发布/支付/生产数据），档位地板≥R2，不得自评压低以跳流程。' ;;
 esac
 
