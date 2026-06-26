@@ -1,6 +1,3 @@
-# Flow 运行流水：本地噪声，不入 git（信号经 harvest 蒸馏后入 lessons/）
-.flow/runs/
-
 # OS / 编辑器
 .DS_Store
 *.swp

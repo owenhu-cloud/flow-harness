@@ -1,7 +1,6 @@
 ---
 name: diagram
-description: Use when a deliverable needs a diagram (R2+). Mermaid only, with the built-in aesthetic rules.
-version: 1
+description: R2+ 交付物需要图时用——架构/流程/状态/数据模型，只产 Mermaid。
 ---
 
 # diagram — 仅 Mermaid
@@ -20,4 +19,4 @@ version: 1
 - 关键路径用 `classDef` 高亮；连线必带标签。
 - 固定一套四色 `classDef`（主/次/外部/告警），全项目复用。
 
-产物落 `docs/`，仅供人看。继承 `.flow/skills/_contract.md`。
+产物落 `docs/`，仅供人看。遵循 `flow` 技能的质量红线。

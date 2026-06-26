@@ -1,10 +1,11 @@
 ---
 name: research
-description: Use on R2/R3 when the task is novel or uncertain and needs investigation before deciding. Always runs in a subagent and returns only distilled, cited conclusions.
-version: 1
+description: R2/R3 任务新颖或不确定、需要先做外部调研再决定时用——派子代理 fan-out 检索，只回传带引用的结论。
 ---
 
 # research — 调研（子代理，只回传结论）
+
+用 `Task` 工具派子代理做，主线程只收结论，保护主上下文。
 
 ## 方法
 
@@ -14,7 +15,7 @@ version: 1
 
 ## 产出（一次蒸馏，不重复写）
 
-- `changes/<id>/research.md`：带引用的综述。
-- 只回传结论给主线程；docs 仅引摘要，不重写。
+- `docs/flow/<change>/research.md`：带引用的综述。
+- 只回传结论给主线程；交付文档仅引摘要，不重写。
 
-继承 `.flow/skills/_contract.md`。
+遵循 `flow` 技能的质量红线。
