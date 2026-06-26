@@ -45,11 +45,17 @@
 - <源类型> | https://...
 ```
 
-落盘后跑校验器（gate-able，纯 POSIX sh，非 0 即不达标）：
+落盘后跑校验器（gate-able，纯 POSIX sh，非 0 即不达标）。脚本随本技能分发，路径 = **技能加载时显示的 "Base directory" + `/references/verify-citations.sh`**（cwd 是用户项目根，别用相对路径找它）；`sources.md` 路径相对用户项目根：
 
 ```
-sh skills/research/references/verify-citations.sh docs/flow/<change>/sources.md
+sh "<本技能 base directory>/references/verify-citations.sh" docs/flow/<change>/sources.md
 ```
 
 它校验：① 每条断言独立源数 ≥ 阈值（默认 3，`MIN_SOURCES=` 可调）；② 每个 URL/DOI 真实可达（curl HEAD，2xx/3xx）。源数不足或引用不可达即 `exit 2` 列出问题——**补足独立源或剔除不可达引用，禁编造引用充数**。离线/测试可用 `FLOW_URL_CHECK` 注入自定义可达性检查器（见 `verify-citations.test.sh`）。
+
+## 收尾硬门（HARD GATE：深档不跑校验器、不绿，不算完成）
+
+> 深档收尾**必须**跑 `verify-citations.sh` 且 **exit 0**，并在完成声明里**贴出它的新鲜输出**。
+> 校验未跑 / 未过 = 深档未完成，禁止据未校验结论拍板——与 Flow「完成必带证据」红线同性质。
+> 自检一句：「校验器今轮跑过吗？绿了吗？输出贴了吗？」任一为否 → 留在深档，别交回 plan。
 
