@@ -2,3 +2,6 @@
 .DS_Store
 *.swp
 .idea/
+
+# 仓库自身开发时 harvest 出的经验（本地保留，不入公开仓库）
+lessons/
