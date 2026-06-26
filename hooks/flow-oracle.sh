@@ -2,24 +2,31 @@
 # Flow 治"自说自话"：独立 Oracle。agent 试图结束（Stop）时，由本 hook —— 一个
 # 与 agent 无关的进程 —— 裁决"完成"。完成不再由 agent 自说自话，而由机制裁决。
 #
-# 两道独立门，任一不过即 exit 2 打回：
-#   A. 完整性门：扫 git diff，禁止靠删测试 / 注入 skip / 删断言来"变绿"——堵住
-#      "绿色退出码 + 被掏空的测试"这一 reward-hacking 盲区（红线 §1/§2 的机器级守卫）。
+# 三道独立门，任一不过即 exit 2 打回：
+#   A. 完整性门：扫 git diff，禁止靠删测试 / 注入 skip / 删断言来"变绿"（语法层守卫）。
 #   B. 验证命令门：跑 docs/flow/verify-cmd，退出码即裁决。
+#   B2. 测试数基线门：解析 runner 输出的"通过数"，低于 docs/flow/test-count 即打回
+#       （语义层守卫——抓 grep 抓不到的"测试数下降"，如删测试/skip 的等价变体）。
 #
 # 威胁模型与边界（诚实声明，勿夸大）：
-#   本门防的是"压力下的 reward-hacking"——agent 为变绿而删/skip 测试、删断言。
-#   它是提高绕过成本、留审计痕迹的纪律门，不是沙箱级隔离。已知绕过（grep 路线的
-#   架构天花板，需 test-count 基线 / 带外门控才能根治，本版未做）：
-#     ① 语义级掏空：块注释断言、清空测试体、把真断言换成等量的永真断言
-#        （删 expect(x).toBe(y) 同时加 expect(true).toBe(true)，净计数持平）——
-#        占用数计数能抓"一行挤多个删除"，但抓不到这种 1 换 1 的语义替换。
+#   本门防的是"压力下的 reward-hacking"，提高绕过成本、留审计痕迹，不是沙箱级隔离。
+#   仍未关闭的绕过（需覆盖率/变异测试 + 带外门控才能根治）：
+#     ① 同数语义掏空：测试仍在、仍通过，只把内部真断言换成等量永真断言
+#        （删 expect(x).toBe(y) 同时加 expect(true).toBe(true)）——测试数不变，B2 抓不到；
+#        断言占用数也持平，A2 抓不到。需覆盖率/变异测试。
 #     ② verify-cmd 间接层：verify-cmd=`sh run.sh` 时，A0 只查 verify-cmd 本身，
-#        改未提交的 run.sh 可绕过 B 门。建议验证命令自包含，或其脚本一并提交。
-#     ③ 有 commit 权限可提交弱化后绕过（v1 只查未并入 HEAD 的工作树改动）；
-#        本轮新建、未提交的测试文件不进 git diff，掏空后对本门不可见。
-#     ④ agent 直接覆写 hooks/flow-oracle.sh / verify-cmd 自身——脚本无法防自身字节被改。
-#   为让门生效，建议把 docs/flow/verify-cmd 与豁免文件纳入版本控制。
+#        改未提交的 run.sh 可绕过。建议验证命令自包含，或其脚本一并提交。
+#     ③ 有 commit 权限可提交弱化后绕过（只查未并入 HEAD 的工作树改动）；
+#        本轮新建、未提交的测试文件不进 git diff，掏空后对完整性门不可见。
+#     ④ agent 直接覆写 hooks/flow-oracle.sh / verify-cmd / test-count 自身——
+#        脚本无法防自身字节被改；基线文件可被改低（故建议纳入版本控制、人审其变更）。
+#   B2 基线门特有的语义层边界（同样需覆盖率/变异 + 人审才能根治）：
+#     ⑤ 解析的是 runner 输出文本，agent 可影响：测试内 print("999 passed") 可向上伪造计数；
+#        reporter 不匹配任一正则时 B2 降级放行（unparseable=放行），改 reporter/吞摘要即绕过。
+#     ⑥ 首次建立的基线是 TOFU（trust-on-first-use，未经核验）：先弱化再首绿会把地板锁低位，
+#        "0 passed" 锁 0 即永久失效。故 docs/flow/test-count 应提交并人审，且依赖完整性门 A
+#        拦截已跟踪测试的掏空（B2 与 A 互补，非替代）。
+#   为让门生效，建议把 docs/flow/{verify-cmd,test-count,verify-allow-test-changes} 纳入版本控制并人审其变更。
 #
 # 严格 opt-in：仅当 docs/flow/verify-cmd 存在且非空时整体生效（由 profile / verify 写入）；
 # 不存在则立即放行（零侵入）。命中 stop_hook_active 则放行，避免死循环。
@@ -32,26 +39,52 @@ case "$INPUT" in
 esac
 
 CMD_FILE="docs/flow/verify-cmd"
+ALLOW_FILE="docs/flow/verify-allow-test-changes"
+COUNT_FILE="docs/flow/test-count"
 [ -f "$CMD_FILE" ] || exit 0          # 未 opt-in：放行
 CMD=$(grep -v '^[[:space:]]*#' "$CMD_FILE" | grep -v '^[[:space:]]*$' \
       | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
 [ -n "$CMD" ] || exit 0               # 空命令：放行（视为该项目无法自动验证）
 
-# ---------- A. 完整性门：禁止靠弱化测试"变绿" ----------
-ALLOW_FILE="docs/flow/verify-allow-test-changes"
-# 测试文件路径模式（限定扫描范围，压低误报）。
-TS1='*test*'; TS2='*spec*'; TS3='*Test*'; TS4='*Spec*'
-# 新增"跳过/忽略测试"标记（多语言）。
+# 测试文件路径模式（限定扫描范围）；刻意排除 docs/flow/（Oracle 自身产物含 "test" 字样会误捕）。
+TS1='*test*'; TS2='*spec*'; TS3='*Test*'; TS4='*Spec*'; EXCL=':(exclude)docs/flow/*'
+
+# 豁免是否生效：git 下仅"已提交且本轮未改动"才算（堵同轮 touch 自助拆门）；
+# 非 git 无从验证跟踪状态，按"存在即生效"（已声明边界）。完整性门与基线门共用。
+override_active() {
+  [ -f "$ALLOW_FILE" ] || return 1
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git ls-files --error-unmatch "$ALLOW_FILE" >/dev/null 2>&1 \
+      && ! git diff HEAD -- "$ALLOW_FILE" 2>/dev/null | grep -q . && return 0
+    return 1
+  fi
+  return 0
+}
+
+# 从 runner 输出解析"通过测试数"。命中即回，未识别回空（→ 降级放行，不误门控）。
+# 多 suite/多 package 输出按同格式**求和**（非 tail）：顺序无关、消除并行交错抖动。
+# 只要解析确定性，绝对精度不重要：建立与比较用同一解析，地板自洽。
+extract_count() {
+  _o=$1; _n=''
+  _n=$(printf '%s\n' "$_o" | grep -oiE '[0-9]+ (passed|passing)' | grep -oE '[0-9]+' | awk '{s+=$1} END{if(NR)print s}')
+  [ -z "$_n" ] && _n=$(printf '%s\n' "$_o" | grep -oiE '[0-9]+ examples?'  | grep -oE '[0-9]+' | awk '{s+=$1} END{if(NR)print s}')
+  [ -z "$_n" ] && _n=$(printf '%s\n' "$_o" | grep -oiE 'ran [0-9]+ tests?' | grep -oE '[0-9]+' | awk '{s+=$1} END{if(NR)print s}')
+  if [ -z "$_n" ]; then
+    _c=$(printf '%s\n' "$_o" | grep -cE '^[[:space:]]*--- PASS:')   # go test -v
+    [ "$_c" -gt 0 ] && _n=$_c
+  fi
+  printf '%s' "$_n"
+}
+
+# ---------- A. 完整性门（git 仓库内）：禁止靠弱化测试"变绿" ----------
 SKIP_RE='(\.(skip|only|todo)\(|(xit|xdescribe|fit|fdescribe|xtest)\(|(it|test|describe)\.(skip|todo)|@pytest\.mark\.(skip|xfail)|@unittest\.skip|pytest\.skip\(|t\.Skip(Now|f)?\(|b\.Skip(Now|f)?\(|#\[ignore\])'
-# 断言行（刻意不含 require：require( 多为 import，会误伤）。
-ASSERT_RE='(assert|expect\(|t\.(error|fatal)|\.should|should\.)'
+ASSERT_RE='(assert|expect\(|t\.(error|fatal)|\.should|should\.)'   # 不含 require：多为 import，会误伤
 
 if command -v git >/dev/null 2>&1 \
    && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
    && git rev-parse --verify HEAD >/dev/null 2>&1; then
 
-  # A0. 自篡改：verify-cmd（门的"燃料"）在未提交改动中被改 → 燃料不可信，打回。
-  #     仅在 verify-cmd 已纳入版本控制时可查（未跟踪则无从比对，见顶部边界声明）。
+  # A0. verify-cmd（门的"燃料"）在未提交改动中被改 → 不可信，打回（仅 tracked 可查）。
   if git diff HEAD -- "$CMD_FILE" 2>/dev/null | grep -q .; then
     {
       printf '[Flow Oracle] 完整性门未通过：docs/flow/verify-cmd（门的燃料）在未提交改动中被修改，不可信。\n'
@@ -60,9 +93,8 @@ if command -v git >/dev/null 2>&1 \
     exit 2
   fi
 
-  # A0b. 测试文件被 assume-unchanged / skip-worktree 标记 → git diff 对其改动失明，
-  #      整道完整性门被静默架空。检出即打回（git ls-files -v：小写状态=assume-unchanged，S=skip-worktree）。
-  if git ls-files -v -- "$TS1" "$TS2" "$TS3" "$TS4" 2>/dev/null | grep -Eq '^([a-z]|S) '; then
+  # A0b. 测试文件被 assume-unchanged / skip-worktree → git diff 失明，整门被静默架空。
+  if git ls-files -v -- "$TS1" "$TS2" "$TS3" "$TS4" "$EXCL" 2>/dev/null | grep -Eq '^([a-z]|S) '; then
     {
       printf '[Flow Oracle] 完整性门未通过：有测试文件被标记 assume-unchanged/skip-worktree，git diff 看不见其改动。\n'
       printf '撤销后再收尾：git update-index --no-assume-unchanged / --no-skip-worktree <file>。\n'
@@ -70,20 +102,12 @@ if command -v git >/dev/null 2>&1 \
     exit 2
   fi
 
-  # 豁免仅在"已提交且本轮未改动"时生效——堵住 agent 同轮 touch 豁免文件自助拆门。
-  OVERRIDE_OK=0
-  if [ -f "$ALLOW_FILE" ] \
-     && git ls-files --error-unmatch "$ALLOW_FILE" >/dev/null 2>&1 \
-     && ! git diff HEAD -- "$ALLOW_FILE" 2>/dev/null | grep -q .; then
-    OVERRIDE_OK=1
-  fi
-
-  if [ "$OVERRIDE_OK" -ne 1 ]; then
-    TDIFF=$(git diff HEAD -- "$TS1" "$TS2" "$TS3" "$TS4" 2>/dev/null)
+  if ! override_active; then
+    TDIFF=$(git diff HEAD -- "$TS1" "$TS2" "$TS3" "$TS4" "$EXCL" 2>/dev/null)
     VIOL=''
 
     # 占用数计数（grep -oE 数命中次数，非命中行数）——堵"一行挤多个删除/凑数"。
-    # A1. 净新增跳过/忽略标记（added > removed，避免重命名已跳过的测试误报）。
+    # A1. 净新增跳过/忽略标记。
     SKIP_ADD=$(printf '%s\n' "$TDIFF" | grep -E '^\+'    | grep -oE  "$SKIP_RE"   | grep -c .)
     SKIP_DEL=$(printf '%s\n' "$TDIFF" | grep -E '^-[^-]' | grep -oE  "$SKIP_RE"   | grep -c .)
     [ "$SKIP_ADD" -gt "$SKIP_DEL" ] && \
@@ -96,7 +120,7 @@ if command -v git >/dev/null 2>&1 \
       VIOL="${VIOL}- 测试断言净减少（删 ${ASS_DEL} > 增 ${ASS_ADD}：assert/expect/should/t.Error…）\n"
 
     # A3. 删除整个测试文件。
-    if git diff HEAD --diff-filter=D --name-only -- "$TS1" "$TS2" "$TS3" "$TS4" 2>/dev/null \
+    if git diff HEAD --diff-filter=D --name-only -- "$TS1" "$TS2" "$TS3" "$TS4" "$EXCL" 2>/dev/null \
        | grep -q .; then
       VIOL="${VIOL}- 删除了测试文件\n"
     fi
@@ -116,15 +140,39 @@ fi
 # ---------- B. 验证命令门 ----------
 OUT=$(sh -c "$CMD" 2>&1)
 CODE=$?
-[ "$CODE" -eq 0 ] && exit 0           # Oracle 判定通过：放行
+if [ "$CODE" -ne 0 ]; then
+  # 失败：exit-2 契约阻止收尾——reason 走 stderr，无需手搓 JSON 转义。Claude Code 回灌给 agent。
+  {
+    printf '[Flow Oracle] 独立验证命令未通过（退出码 %s），不得声明完成。\n' "$CODE"
+    printf '命令：%s\n' "$CMD"
+    printf -- '--- 输出末 40 行 ---\n'
+    printf '%s\n' "$OUT" | tail -n 40
+    printf '修实现直到此命令绿，禁止改测试/断言/CI 使其变绿（红线 §1/§2）。\n'
+  } >&2
+  exit 2
+fi
 
-# 失败：用 Stop hook 的 exit-2 契约阻止收尾——reason 走 stderr，退出码 2 即 block。
-# 刻意不组 JSON：stderr 可含任意字节（引号 / 换行 / ANSI），无需转义。Claude Code 会回灌给 agent。
-{
-  printf '[Flow Oracle] 独立验证命令未通过（退出码 %s），不得声明完成。\n' "$CODE"
-  printf '命令：%s\n' "$CMD"
-  printf -- '--- 输出末 40 行 ---\n'
-  printf '%s\n' "$OUT" | tail -n 40
-  printf '修实现直到此命令绿，禁止改测试/断言/CI 使其变绿（红线 §1/§2）。\n'
-} >&2
-exit 2
+# ---------- B2. 测试数基线门（命令已绿）----------
+# 解析通过数；与基线比。缺失则建立（establish-if-missing），低于基线即打回。
+# 不向上 ratchet（避免 env 波动把地板锁到高水位后误门控）；正当下降经已提交豁免接受并刷新。
+CUR=$(extract_count "$OUT")
+if [ -n "$CUR" ]; then
+  if [ -f "$COUNT_FILE" ]; then
+    BASE=$(grep -oE '[0-9]+' "$COUNT_FILE" | head -n1)
+    if [ -n "$BASE" ] && [ "$CUR" -lt "$BASE" ]; then
+      if override_active; then
+        printf '%s\n' "$CUR" > "$COUNT_FILE"     # 接受正当下降，刷新基线
+      else
+        {
+          printf '[Flow Oracle] 测试数基线门未通过：通过测试数从基线 %s 跌到 %s，疑似掏空/删/skip 测试。\n' "$BASE" "$CUR"
+          printf '挂了就是没过，恢复测试或修实现；若为正当删减，提交 %s 后再收尾（留审计痕迹）。\n' "$ALLOW_FILE"
+        } >&2
+        exit 2
+      fi
+    fi
+  else
+    printf '%s\n' "$CUR" > "$COUNT_FILE"          # 首次绿：建立基线
+  fi
+fi
+
+exit 0

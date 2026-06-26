@@ -27,6 +27,11 @@ run() {  # run <name> <expected_code> <stdin_json>
     sed 's/^/        err> /' "$TMP/err" | head -6
   fi
 }
+assert_file() {  # assert_file <name> <path> <expected-trimmed>
+  _n=$1; _got=$(tr -d '[:space:]' < "$2" 2>/dev/null)
+  if [ "$_got" = "$3" ]; then PASS=$((PASS+1)); printf 'PASS  %s (%s=%s)\n' "$_n" "$2" "$_got"
+  else FAIL=$((FAIL+1)); printf 'FAIL  %s: expected %s=%s got "%s"\n' "$_n" "$2" "$3" "$_got"; fi
+}
 newdir() { WORK="$TMP/$1"; mkdir -p "$WORK/docs/flow"; cd "$WORK" || exit 1; }
 setcmd() { printf '%s\n' "$1" > "$WORK/docs/flow/verify-cmd"; }
 gitinit() { git init -q; git config user.email t@t; git config user.name t; }
@@ -155,6 +160,62 @@ git add -A; git commit -qm base
 git update-index --assume-unchanged tests/foo.test.js
 printf 'test.skip("a", () => {})\n' > tests/foo.test.js
 run "assume-unchanged test file → block" 2 "$NOSTOP"
+
+# ---- B2. 测试数基线门 ----
+# 首次绿：建立基线（写入解析出的通过数）
+newdir cB1; setcmd "printf '3 passed\n'"
+run "baseline establish → pass" 0 "$NOSTOP"
+assert_file "baseline file written =3" docs/flow/test-count 3
+
+# 通过数跌破基线 → 打回（语义层：抓 grep 抓不到的测试数下降）
+newdir cB2; setcmd "printf '2 passed\n'"; printf '3\n' > docs/flow/test-count
+run "count below baseline → block" 2 "$NOSTOP"
+
+# 等于/高于基线 → 放行；不向上 ratchet（基线不动）
+newdir cB3; setcmd "printf '3 passed\n'"; printf '3\n' > docs/flow/test-count
+run "count == baseline → pass" 0 "$NOSTOP"
+newdir cB4; setcmd "printf '5 passed\n'"; printf '3\n' > docs/flow/test-count
+run "count > baseline → pass" 0 "$NOSTOP"
+assert_file "no ratchet (baseline stays 3)" docs/flow/test-count 3
+
+# jest 摘要格式解析（"4 passed" < 5 → block）
+newdir cB5; setcmd "printf 'Tests:       4 passed, 4 total\n'"; printf '5\n' > docs/flow/test-count
+run "jest format below baseline → block" 2 "$NOSTOP"
+
+# go test -v 计 --- PASS:（2 < 3 → block）
+newdir cB6; setcmd "printf -- '--- PASS: TestA (0.00s)\n--- PASS: TestB (0.00s)\n'"; printf '3\n' > docs/flow/test-count
+run "go -v PASS count below baseline → block" 2 "$NOSTOP"
+
+# 无法识别的输出 + 有基线 → 降级放行（不误门控）
+newdir cB7; setcmd "printf 'everything looks fine\n'"; printf '3\n' > docs/flow/test-count
+run "unparseable output → degrade-open pass" 0 "$NOSTOP"
+
+# 跌破 + 已提交豁免 → 放行并刷新基线为新值
+newdir cB8; gitinit
+setcmd "printf '2 passed\\n'"
+printf '3\n' > docs/flow/test-count
+touch docs/flow/verify-allow-test-changes
+git add -A; git commit -qm base
+run "count drop + committed override → pass" 0 "$NOSTOP"
+assert_file "baseline refreshed to 2" docs/flow/test-count 2
+
+# docs/flow/ 被排除：删 docs/flow/test-count 不应被当成"删测试文件"
+newdir cB9; setcmd 'true'; gitinit
+printf '3\n' > docs/flow/test-count; git add -A; git commit -qm base
+git rm -q docs/flow/test-count
+run "delete docs/flow/test-count (excluded) → pass" 0 "$NOSTOP"
+
+# 多 suite 求和（10+2=12）：用 tail 会得 2(<5 误 block)，求和得 12(>=5) → pass，证伪 tail
+newdir cB10; setcmd "printf 'suite A\\n10 passed\\nsuite B\\n2 passed\\n'"; printf '5\n' > docs/flow/test-count
+run "multi-suite SUM (10+2>=5) → pass" 0 "$NOSTOP"
+# 求和后仍正常enforce地板（12 < 15 → block）
+newdir cB11; setcmd "printf 'suite A\\n10 passed\\nsuite B\\n2 passed\\n'"; printf '15\n' > docs/flow/test-count
+run "multi-suite SUM (12<15) → block" 2 "$NOSTOP"
+
+# TOFU 边界（文档化）：无基线时首绿即锁，"0 passed" 锁 0（floor 自此失效）
+newdir cB12; setcmd "printf '0 passed\n'"
+run "establish '0 passed' (TOFU) → pass" 0 "$NOSTOP"
+assert_file "TOFU locks baseline=0" docs/flow/test-count 0
 
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
