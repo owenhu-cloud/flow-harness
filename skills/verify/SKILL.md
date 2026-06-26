@@ -1,6 +1,6 @@
 ---
 name: verify
-description: 声明「完成/通过」前用（所有档位）——找出并运行项目真实的 build/test 命令，按档位跑足深度，贴出新鲜输出作为证据。手测、口头「应该没问题」不算。
+description: 声明「完成/通过」前用（所有档位）——找出并运行项目真实的 build/test 命令，按档位跑足深度，贴出新鲜输出作为证据。手测、口头「应该没问题」不算。 · EN: before claiming done/passing (all tiers) — find & run the project's real build/test commands at the tier's depth, paste fresh output as evidence. Manual testing or "should be fine" does NOT count.
 ---
 
 # verify — 完成必带证据
@@ -9,7 +9,7 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 
 ## 先找到项目真实的验证命令（可靠性递降）
 
-0. **项目画像**：先看 `docs/flow/project.md`。存在即用其中已固化的 test/build/lint 命令，不重复探测（由 `profile` 维护）。不存在则按下列阶梯现场探测，并提示首个任务应先跑 `profile` 固化。
+0. **项目画像**：先看 `docs/flow/project.md`。存在即用其中已固化的 test/build/lint 命令，不重复探测（由 `profile` 维护）。不存在则按下列阶梯现场探测，并提示首个任务应先跑 `profile` 固化。若 `flow-bootstrap` 提示画像过期（清单晚于 `project.md`），先回 `profile` 更新再用其命令，别拿过期命令验证。
 1. **CI 配置**（`.github/workflows/*`、`.gitlab-ci.yml`、`.circleci/` 等）——最可靠：CI 真正跑的就是验证函数，照搬它的命令。
 2. **包/构建清单**（`package.json` scripts、`Makefile`、`Cargo.toml`、`pyproject.toml`、`go.mod`）。
 3. **代码采样**：测试目录与命名约定、测试框架。

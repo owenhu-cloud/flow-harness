@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: R2/R3 任务开头、方向还没定时用——先对齐方向和关键权衡，不写计划、不碰代码。R0/R1 不用。
+description: R2/R3 任务开头、方向还没定时用——先对齐方向和关键权衡，不写计划、不碰代码。R0/R1 不用。 · EN: brainstorm / align direction / explore distinct approaches & tradeoffs before planning (R2/R3, direction not yet decided).
 ---
 
 # brainstorm — 对齐方向（R2/R3）

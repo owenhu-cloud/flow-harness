@@ -1,6 +1,6 @@
 ---
 name: diagram
-description: R2+ 交付物需要图时用——架构/流程/状态/数据模型，只产 Mermaid。
+description: R2+ 交付物需要图时用——架构/流程/状态/数据模型，只产 Mermaid。 · EN: diagram / mermaid — architecture / flow / sequence / state / ER diagram for a deliverable (R2+).
 ---
 
 # diagram — 仅 Mermaid

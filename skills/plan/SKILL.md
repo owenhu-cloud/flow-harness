@@ -1,6 +1,6 @@
 ---
 name: plan
-description: R2/R3 在 brainstorm 已确认方向后用——把选定方向落成可执行的设计 + 任务拆解，进门后不再发散。
+description: R2/R3 在 brainstorm 已确认方向后用——把选定方向落成可执行的设计 + 任务拆解，进门后不再发散。 · EN: turn the agreed direction into an executable design + task breakdown; no more diverging past the gate (R2/R3, after brainstorm).
 ---
 
 # plan — 落方案（R2/R3）

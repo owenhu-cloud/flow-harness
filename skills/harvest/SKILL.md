@@ -1,6 +1,6 @@
 ---
 name: harvest
-description: 一次 change 撞上学习信号后用——连续失败/升维到移交/返工/档位被推翻/verifier 抓到真 bug 时，把根因沉淀成一条可复用经验。无信号不触发。
+description: 一次 change 撞上学习信号后用——连续失败/升维到移交/返工/档位被推翻/verifier 抓到真 bug 时，把根因沉淀成一条可复用经验。无信号不触发。 · EN: capture a reusable lesson after a learning signal (repeated failure / escalation to handoff / rework / tier overturned / verifier found a real bug). No signal → don't trigger.
 ---
 
 # harvest — 沉淀经验

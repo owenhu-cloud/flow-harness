@@ -1,6 +1,6 @@
 ---
 name: flow
-description: 在动手任何工程任务前先用——判断任务复杂度档位（R0–R3），按档位决定该走多重的流程，并加载对应的 Flow 技能。涉及写代码、改配置、重构、调试、设计、修 bug、做功能时都适用。
+description: 在动手任何工程任务前先用——判断任务复杂度档位（R0–R3），按档位决定该走多重的流程，并加载对应的 Flow 技能。涉及写代码、改配置、重构、调试、设计、修 bug、做功能时都适用。 · EN: use before ANY engineering task — judge the complexity tier (R0–R3) and route to the right process depth; applies to writing code / changing config / refactoring / debugging / design / bugfixing / building a feature.
 ---
 
 # Flow — 按复杂度路由的工程工作流
@@ -30,6 +30,19 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 判完用一句话告诉用户：「这是 R2（影响面2/不可逆1/未知2/风险2=7），走 brainstorm→plan→门→implement→verify→document」。然后**用 `Skill` 工具加载第一支流程技能**，别凭记忆复述步骤。
 
 **覆盖标记**（用户消息里出现即生效）：`#R0`..`#R3` 强制档位 · `#skip-flow` 本次不走 Flow · `#new` 对当前任务重新判档。
+
+### 档位地板（敏感面不得自评压低）
+
+判档是自评，但触及高危面时**档位有地板，不得为省流程把分打低**：
+
+| 命中面 | 地板 |
+|---|---|
+| 数据库迁移 / schema 变更 / 破坏性 SQL(drop/delete/truncate) / 数据回填 | ≥ **R2** |
+| 认证 / 鉴权 / 权限 / 密钥 / token | ≥ **R2** |
+| CI / 发布 / 部署 / 生产数据 | ≥ **R2** |
+| 支付 / 计费 / 资金 | ≥ **R2** |
+
+`flow-reinject` hook 会在你的消息命中这些关键词时贴出地板提示。压低档位以跳门 = 违反纪律，与删测试变绿同性质。
 
 ## 技能地图（按需用 Skill 工具加载，别一次性全读）
 

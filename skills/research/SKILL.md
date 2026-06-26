@@ -1,6 +1,6 @@
 ---
 name: research
-description: R2/R3 任务新颖或不确定、需要先做外部调研再决定时用——派子代理 fan-out 检索，只回传带引用的结论。
+description: R2/R3 任务新颖或不确定、需要先做外部调研再决定时用——派子代理 fan-out 检索，只回传带引用的结论。 · EN: research — fan-out subagents to gather cited findings before deciding (R2/R3, novel or uncertain).
 ---
 
 # research — 调研（子代理，只回传结论）

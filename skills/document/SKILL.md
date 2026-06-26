@@ -1,6 +1,6 @@
 ---
 name: document
-description: 实现收敛后（R1+）需要给人看的交付物时用——只写结论、设计取舍、关键图，禁止执行流水账。
+description: 实现收敛后（R1+）需要给人看的交付物时用——只写结论、设计取舍、关键图，禁止执行流水账。 · EN: write a human-facing deliverable / design doc / PR description / changelog — conclusions & tradeoffs, not a play-by-play log (R1+).
 ---
 
 # document — 人类交付物（R1+）

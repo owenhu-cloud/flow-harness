@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: 要新增或修改一支 Flow 技能时用——对流程文档套 TDD（先写失败场景再写规则），并讲清楚原生技能的最小格式。
+description: 要新增或修改一支 Flow 技能时用——对流程文档套 TDD（先写失败场景再写规则），并讲清楚原生技能的最小格式。 · EN: add or edit a Flow skill — apply TDD to the process doc (write the failing scenario first), and the minimal native SKILL.md format.
 ---
 
 # writing-skills — 写技能（对流程文档套 TDD）
