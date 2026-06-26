@@ -1,0 +1,22 @@
+{
+  "name": "flow",
+  "version": "1.0.0",
+  "description": "Flow — 按复杂度路由的工程工作流，纯原生 Claude Code 技能实现。一支 SessionStart hook + 一组按需加载的技能：动手前判 R0–R3 档位、按档位走 brainstorm→plan→门→implement→verify→document，完成必带证据。无 CLI、无后台进程、无状态文件。",
+  "author": {
+    "name": "owenhu",
+    "url": "https://github.com/owenhu-cloud"
+  },
+  "homepage": "https://github.com/owenhu-cloud/flow-harness",
+  "repository": "https://github.com/owenhu-cloud/flow-harness",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json",
+  "keywords": [
+    "workflow",
+    "skills",
+    "tier-routing",
+    "tdd",
+    "verification",
+    "quality-gate",
+    "claude-code"
+  ]
+}

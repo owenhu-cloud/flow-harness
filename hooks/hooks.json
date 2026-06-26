@@ -1,0 +1,39 @@
+{
+  "description": "Flow 的三支 hook：(1) SessionStart 注入完整路由纪律；(2) UserPromptSubmit 每轮重注入一句短纪律，对抗上下文增长把提示埋没（治衰减）；(3) Stop 独立 Oracle，agent 喊完成时跑项目真实验证命令裁决，失败即打回（治自说自话，opt-in：仅 docs/flow/verify-cmd 存在时生效）。其余能力全是原生技能，按需用 Skill 工具加载。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/flow-bootstrap.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/flow-reinject.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/flow-oracle.sh\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
