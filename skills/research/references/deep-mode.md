@@ -33,3 +33,23 @@
 - 结论与 `sources.md` 一一对应，无悬空断言。
 
 不达标 = 深档未完成，退回浅档结论并显式标注「未达深档强度」，不冒充已深核。
+
+## 机器校验（sources.md 格式 + 校验脚本）
+
+`sources.md` 用可被脚本解析的格式（`## ` 起一条断言块，每个 `- ` 行含一个 URL/doi 即计一个源）：
+
+```
+## <断言文本>
+- <源类型> | https://...
+- <源类型> | doi:10.xxxx/...
+- <源类型> | https://...
+```
+
+落盘后跑校验器（gate-able，纯 POSIX sh，非 0 即不达标）：
+
+```
+sh skills/research/references/verify-citations.sh docs/flow/<change>/sources.md
+```
+
+它校验：① 每条断言独立源数 ≥ 阈值（默认 3，`MIN_SOURCES=` 可调）；② 每个 URL/DOI 真实可达（curl HEAD，2xx/3xx）。源数不足或引用不可达即 `exit 2` 列出问题——**补足独立源或剔除不可达引用，禁编造引用充数**。离线/测试可用 `FLOW_URL_CHECK` 注入自定义可达性检查器（见 `verify-citations.test.sh`）。
+
