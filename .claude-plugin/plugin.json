@@ -9,7 +9,6 @@
   "homepage": "https://github.com/owenhu-cloud/flow-harness",
   "repository": "https://github.com/owenhu-cloud/flow-harness",
   "license": "MIT",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "workflow",
     "skills",
