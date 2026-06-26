@@ -7,6 +7,13 @@
 #   B. 验证命令门：跑 docs/flow/verify-cmd，退出码即裁决。
 #   B2. 测试数基线门：解析 runner 输出的"通过数"，低于 docs/flow/test-count 即打回
 #       （语义层守卫——抓 grep 抓不到的"测试数下降"，如删测试/skip 的等价变体）。
+# 降本（严格 opt-in）：存在 docs/flow/verify-cache 时，状态指纹与上次绿相同即跳过全部门。
+#   默认关闭 → 行为不变；仅 git、指纹保守、非 git/失败即回退到"跑"。已知 false-skip 边界：
+#     ① 指纹用 --exclude-standard：.gitignore 的测试依赖（.env/fixtures/本地 DB）改动不触发
+#        失效——测试依赖被忽略文件时勿开 verify-cache（纳入全部 ignored 文件会拖垮指纹）。
+#     ② .last-green 掺入机器/仓库路径身份，**勿提交共享**；跨机/CI 各自重建。
+#     ③ 开 verify-cache = 把门可靠性下放给指纹完备性：指纹任一盲点会同时穿透 A/B/B2 三门。
+#     ④ 含换行的未跟踪文件名（病态）可能漏入指纹——极罕见，已知边界。
 #
 # 威胁模型与边界（诚实声明，勿夸大）：
 #   本门防的是"压力下的 reward-hacking"，提高绕过成本、留审计痕迹，不是沙箱级隔离。
@@ -75,6 +82,43 @@ extract_count() {
   fi
   printf '%s' "$_n"
 }
+
+# 可移植哈希（变更检测用）：优先 shasum/sha1sum，回退 cksum。
+_hash() {
+  if command -v shasum >/dev/null 2>&1; then shasum | awk '{print $1}'
+  elif command -v sha1sum >/dev/null 2>&1; then sha1sum | awk '{print $1}'
+  else cksum | awk '{print $1"-"$2}'; fi
+}
+
+# 验证相关状态的保守指纹：HEAD + 已跟踪改动 + 未跟踪文件内容 + verify-cmd 本身。
+# 刻意排除 docs/flow/（Oracle 自身产物，含 .last-green/test-count，否则写产物会自扰动指纹）。
+# 非 git 回空 → 调用方据此永不跳过（fail-safe-to-run）。
+verify_fingerprint() {
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  {
+    git rev-parse HEAD 2>/dev/null
+    git diff HEAD -- . "$EXCL" 2>/dev/null
+    git ls-files --others --exclude-standard -- . "$EXCL" 2>/dev/null \
+      | while IFS= read -r _f; do printf '== %s\n' "$_f"; cat "$_f" 2>/dev/null; done
+    cat "$CMD_FILE" 2>/dev/null
+    git rev-parse --show-toplevel 2>/dev/null    # 仓库绝对路径 + 机器身份：
+    uname -srm 2>/dev/null                        # 令被提交/共享的 .last-green 在异机/异路径不误匹配
+  } | _hash
+}
+
+# ---------- 降本：跳过"自上次绿以来状态未变"（严格 opt-in：docs/flow/verify-cache 存在时）----------
+# 默认关闭 → 门行为不变、依旧每次全验。开启后：指纹与上次绿相同即放行不重跑（含 A/B/B2）；
+# 指纹相同意味着源码与 verify-cmd 均未变，上次绿的结论仍成立，跳过安全。
+CACHE_FLAG="docs/flow/verify-cache"
+LASTGREEN="docs/flow/.last-green"
+FP=''
+if [ -f "$CACHE_FLAG" ]; then
+  FP=$(verify_fingerprint)
+  if [ -n "$FP" ] && [ -f "$LASTGREEN" ] && [ "$FP" = "$(cat "$LASTGREEN" 2>/dev/null)" ]; then
+    exit 0
+  fi
+fi
 
 # ---------- A. 完整性门（git 仓库内）：禁止靠弱化测试"变绿" ----------
 SKIP_RE='(\.(skip|only|todo)\(|(xit|xdescribe|fit|fdescribe|xtest)\(|(it|test|describe)\.(skip|todo)|@pytest\.mark\.(skip|xfail)|@unittest\.skip|pytest\.skip\(|t\.Skip(Now|f)?\(|b\.Skip(Now|f)?\(|#\[ignore\])'
@@ -174,5 +218,8 @@ if [ -n "$CUR" ]; then
     printf '%s\n' "$CUR" > "$COUNT_FILE"          # 首次绿：建立基线
   fi
 fi
+
+# 全部门通过 → 若开启缓存，记录本次绿的状态指纹，供下次 skip-if-unchanged。
+[ -f "$CACHE_FLAG" ] && [ -n "$FP" ] && printf '%s\n' "$FP" > "$LASTGREEN"
 
 exit 0

@@ -217,5 +217,63 @@ newdir cB12; setcmd "printf '0 passed\n'"
 run "establish '0 passed' (TOFU) → pass" 0 "$NOSTOP"
 assert_file "TOFU locks baseline=0" docs/flow/test-count 0
 
+# ---- 降本：skip-if-unchanged（opt-in docs/flow/verify-cache）----
+# 建立 → 状态未变第二次跳过（命令只跑一次；marker 落 docs/flow，被指纹排除不自扰动）
+newdir cC1; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; true"
+run "cache 1st (establish) → pass" 0 "$NOSTOP"
+run "cache 2nd (unchanged, skip) → pass" 0 "$NOSTOP"
+assert_file "cache: cmd ran ONCE (skipped 2nd)" docs/flow/runmarker RAN
+
+# 源码改动 → 指纹变 → 重跑（命令跑两次）
+newdir cC2; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; true"
+run "cache establish → pass" 0 "$NOSTOP"
+printf 'changed\n' >> app.js
+run "cache: source changed → re-run → pass" 0 "$NOSTOP"
+assert_file "cache: cmd ran TWICE on change" docs/flow/runmarker RANRAN
+
+# 改 verify-cmd（在指纹内）→ 指纹变 → 重跑（证伪 docs/flow 全排除会漏掉命令变更）
+newdir cC4; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; true"
+run "cache establish → pass" 0 "$NOSTOP"
+setcmd 'false'
+run "cache: verify-cmd changed → re-run → block" 2 "$NOSTOP"
+
+# 默认关闭（无 verify-cache）→ 永不跳过
+newdir cC3; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+setcmd 'false'
+run "cache OFF by default → runs → block" 2 "$NOSTOP"
+
+# 非 git + 开了缓存 → 指纹为空 → fail-safe-to-run，永不跳过
+newdir cC5; touch docs/flow/verify-cache; setcmd 'false'
+run "cache on but non-git → never skip → block" 2 "$NOSTOP"
+
+# #2 修复：.last-green 含机器/路径身份 → 复制到异路径（模拟提交共享/异机）不再 false-skip
+newdir cC6; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; true"
+run "cache establish (for clone) → pass" 0 "$NOSTOP"
+CLONE="$TMP/cC6clone"; cp -r "$WORK" "$CLONE"; cd "$CLONE"
+run "shared .last-green on different path → re-run (no false-skip) → pass" 0 "$NOSTOP"
+assert_file "path identity: clone re-ran (cmd twice)" docs/flow/runmarker RANRAN
+
+# 正向回归：verify-cmd 委托的【未跟踪】run.sh 改坏 → 指纹变（cat 未跟踪内容）→ 重跑 → block
+newdir cC7; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
+touch docs/flow/verify-cache
+printf 'exit 0\n' > run.sh; setcmd 'sh run.sh'
+run "cache establish (untracked delegate) → pass" 0 "$NOSTOP"
+printf 'exit 1\n' > run.sh
+run "untracked run.sh changed → cache re-run → block" 2 "$NOSTOP"
+
+# #1 已知边界（文档化）：.gitignore 的测试依赖改动不触发失效 → false-skip
+newdir cC8; gitinit
+printf 'data.txt\n' > .gitignore; printf 'A\n' > data.txt; printf 'src\n' > app.js
+git add app.js .gitignore; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; grep -q A data.txt"
+run "cache establish (ignored dep) → pass" 0 "$NOSTOP"
+printf 'B\n' > data.txt
+run "ignored-dep changed → FALSE-SKIP (known boundary) → pass" 0 "$NOSTOP"
+assert_file "boundary: ignored-dep skip (cmd ran once)" docs/flow/runmarker RAN
+
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
