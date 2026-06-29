@@ -100,6 +100,8 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 - [ ] 报告里没有 should/seems/应该/大概 这类规避措辞。
 - [ ] `docs/flow/verify-cmd` 已同步当前裁决命令（喂给 Oracle）。
 
+高风险/高不可逆面想用**异模型**对抗证伪增强独立性（不替代本技能跑命令）→ 用 Skill 工具加载 `cross-verify`。
+
 下一步：验证全绿且需要给人看的交付物时，用 Skill 工具加载 `document` 技能产出结论；若 verify 抓到真 bug 或反复返工，用 Skill 工具加载 `harvest` 沉淀经验。
 
 遵循 `flow` 技能的质量红线。
