@@ -70,6 +70,29 @@ external-agent.sh dispatch codex-cli /tmp/cv-prompt /tmp/cv-out   # 结构化裁
 prompt 内容：change 描述 + 期望行为 + diff + 「对抗证伪，默认怀疑，逐条给 文件:行 + 复现」。
 **健康检查**：`external-agent.sh healthcheck codex-cli`。适用于 MCP 未启用、或想一次性跨模型审查的场景。
 
+## 适配器 3：Grok via CLI（xAI Grok，只读对抗验证）
+
+xAI 的 Grok agentic CLI（`~/.grok/bin/grok`）作只读对抗 verifier。**Grok 无 MCP server 模式**（`grok mcp` 是反向——让 grok 去连别的 MCP），故只走 CLI 派发，不进 `.mcp.json`。
+
+**前置**：装 Grok CLI 并 `grok login`（认证落 `~/.grok/auth.json`）。
+
+**派发**（经底座，已实装）：
+```
+printf '%s' "$ADVERSARIAL_PROMPT_WITH_DIFF" > /tmp/cv-prompt
+external-agent.sh dispatch grok-cli /tmp/cv-prompt /tmp/cv-out
+```
+底层实际命令（经真实调用验证）：
+```
+grok -p "<prompt>" --permission-mode plan --output-format plain </dev/null
+```
+- **只读保证**：`--permission-mode plan`（plan 模式只规划不改文件，对应 codex 的 `--sandbox read-only`）——verifier 不许改码。
+- **不传 effort**：默认模型 `grok-composer-2.5-fast` 不支持 `reasoningEffort`，传了会 400；故 `CROSS_VERIFY_EFFORT` 仅对 codex 生效。
+- **健康检查**：`external-agent.sh healthcheck grok-cli`（grok binary + `~/.grok/auth.json`）。
+- **环境覆盖**：`GROK_BIN`(默认 grok) · `GROK_HOME`(默认 ~/.grok)。
+- **范围**：仅 `cross-verify`（`dispatch`）。**未实现 `dispatch-write`**（`cross-execute` 写沙箱）——grok 写模式（`--permission-mode acceptEdits` + worktree cwd）待验证后再加；当前对 grok-cli 调 dispatch-write 会 `unknown adapter`。
+
+**多适配器**：`docs/flow/cross-verify` 单行单适配器（派发侧择一）。要 codex 与 grok 都用，可按 change 风险切换该键，或在编排层分别 `dispatch codex-mcp` / `dispatch grok-cli` 取双模型二意见（吃双份额度）。
+
 ## 接其它模型
 
 任意提供**非交互 CLI**或**MCP server** 的外部 coding agent 同理：

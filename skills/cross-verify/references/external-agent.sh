@@ -21,14 +21,20 @@
 # 适配器键: codex-mcp / codex-cli 均经本地 `codex exec` 派发（CLI 路径）。
 #   skill 层在 opt-in=codex-mcp 且会话内 MCP 工具可用时改走 MCP 工具，本脚本是通用回退
 #   （子代理内无 MCP、或想脚本化/CI 一次性派发时用）。
-# 接新模型: 在 codex_available / do_dispatch 的 case 增一个 adapter 分支即可（见 adapters.md 扩展点）。
+#   grok-cli 经 `grok -p --permission-mode plan`（headless 只读）派发；Grok 无 MCP server 模式
+#   （`grok mcp` 是反向：让 grok 连别的 MCP），故只走 CLI。仅 cross-verify(dispatch)；
+#   未实现 dispatch-write（cross-execute），grok 写沙箱待 worktree 写模式验证后再加。
+# 接新模型: 在 *_available / cmd_dispatch 的 case 增一个 adapter 分支即可（见 adapters.md 扩展点）。
 #
-# 环境覆盖: CODEX_BIN(默认 codex) · CODEX_HOME(默认 ~/.codex) · CROSS_VERIFY_EFFORT(默认 medium)。
+# 环境覆盖: CODEX_BIN(默认 codex) · CODEX_HOME(默认 ~/.codex) · GROK_BIN(默认 grok) ·
+#   GROK_HOME(默认 ~/.grok) · CROSS_VERIFY_EFFORT(默认 medium，仅 codex)。
 # 注: codex 子命令/flag 随版本漂移，健康检查失败即降级；细节以 `codex exec --help` 为准。
 
 set -eu
 CODEX_BIN="${CODEX_BIN:-codex}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+GROK_BIN="${GROK_BIN:-grok}"
+GROK_HOME="${GROK_HOME:-$HOME/.grok}"
 EFFORT="${CROSS_VERIFY_EFFORT:-medium}"
 TIMEOUT="${CROSS_VERIFY_TIMEOUT:-300}"
 
@@ -58,9 +64,17 @@ codex_available() {
   return 0
 }
 
+# grok 是否可用：binary + 认证文件在场（同 codex_available 形态）。
+grok_available() {
+  command -v "$GROK_BIN" >/dev/null 2>&1 || return 1
+  [ -f "$GROK_HOME/auth.json" ] || return 1
+  return 0
+}
+
 cmd_healthcheck() {
   case "$1" in
     codex-mcp|codex-cli) codex_available && exit 0 || exit 3 ;;
+    grok-cli) grok_available && exit 0 || exit 3 ;;
     *) die "unknown adapter: $1" ;;
   esac
 }
@@ -82,6 +96,24 @@ cmd_dispatch() {
       elif [ "$_rc" -ne 0 ]; then
         _msg=$(tail -n 5 "$_err" 2>/dev/null | tr '\n' ' '); rm -f "$_err"
         die "codex dispatch failed (adapter=$adapter, rc=$_rc): $_msg"
+      fi
+      rm -f "$_err"
+      [ -s "$of" ] || die "empty dispatch output"
+      exit 0 ;;
+    grok-cli)
+      grok_available || exit 3
+      _err=$(mktemp)
+      # </dev/null 防 grok 读 stdin 挂起；--permission-mode plan = 只读规划模式（verifier 不许改码，
+      # 对应 codex 的 --sandbox read-only）；默认模型 grok-composer 不支持 reasoningEffort，故不传
+      # effort；--output-format plain 取纯文本裁决；超时防卡死；stderr 留作排障。
+      _rc=0
+      run_timeout "$TIMEOUT" "$GROK_BIN" -p "$(cat "$pf")" \
+        --permission-mode plan --output-format plain </dev/null >"$of" 2>"$_err" || _rc=$?
+      if [ "$_rc" -eq 124 ]; then
+        rm -f "$_err"; die "grok dispatch timed out after ${TIMEOUT}s (adapter=$adapter)"
+      elif [ "$_rc" -ne 0 ]; then
+        _msg=$(tail -n 5 "$_err" 2>/dev/null | tr '\n' ' '); rm -f "$_err"
+        die "grok dispatch failed (adapter=$adapter, rc=$_rc): $_msg"
       fi
       rm -f "$_err"
       [ -s "$of" ] || die "empty dispatch output"
