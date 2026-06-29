@@ -8,9 +8,15 @@ SKILL.md 正文工具无关；具体工具只活在这里。
 具体派发**统一经本目录的 `external-agent.sh`**（一次性脚本，仿 `verify-citations.sh` 先例；遵 DESIGN「除三支 hook 外不引入常驻 CLI」）。技能不手搓 codex bash——避免重复踩 stdin 挂起 / trusted-dir / 降级的坑。两个子命令即适配器契约：
 
 ```
-external-agent.sh healthcheck <adapter>            # 可用 0 / 不可用 3（降级信号）
-external-agent.sh dispatch    <adapter> <prompt-file> <out-file>   # 结果写 out-file
+external-agent.sh healthcheck    <adapter>            # 可用 0 / 不可用 3（降级信号）
+external-agent.sh dispatch       <adapter> <prompt-file> <out-file>   # 只读对抗验证，结果写 out-file
+external-agent.sh dispatch-write <adapter> <prompt-file> <out-file> <worktree-dir>  # 写沙箱执行（cross-execute 用）
 ```
+
+`dispatch-write` 是 `cross-execute`（R3、默认关闭）专用的写沙箱变体：`--sandbox workspace-write`
+（`codex exec` 非交互、无审批提示），在 `<worktree-dir>`（**必须是 `git worktree add` 产生的隔离
+linked worktree**，脚本会校验、拒主工作区/裸目录）内派 agent 落地子任务。退出码同 `dispatch`（0/3/1）。
+`cross-verify`（只验不改）只用 `dispatch`；只有 `cross-execute`（派异模型执行）才用 `dispatch-write`。
 
 ## 适配器接口（任何外部验证器都要满足两点）
 
@@ -20,6 +26,7 @@ external-agent.sh dispatch    <adapter> <prompt-file> <out-file>   # 结果写 o
 2. **`healthcheck`** —— 判断当前是否可用（决定启用还是降级；不可用返回 exit 3）。
 
 满足这两点的任何外部 coding agent（提供非交互 CLI 或 MCP server 者）都能填进来。
+（额外）若该适配器还想支撑 `cross-execute` 的派发执行，需在 `cmd_dispatch_write` 的 `case` 也加一支：与 `dispatch` 同构，但用该 agent 的**写沙箱 + 非交互**子命令、并在传入的 worktree cwd 内执行。只做 `cross-verify` 则无需实现它。
 
 ## 项目 opt-in：`docs/flow/cross-verify`
 

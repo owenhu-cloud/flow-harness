@@ -60,6 +60,7 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 | `systematic-debugging` | 调试/修 bug 卡住，四阶段根因调试（无根因不提修复） | R1 R2 R3 |
 | `code-review` | implement 后、交付前，派独立 reviewer 子代理评审并处理反馈 | R2 R3 |
 | `cross-verify` | 高风险/高不可逆 change，把独立 verifier/reviewer 升级为**不同模型/外部 agent**（MCP/CLI，如 Codex）对抗证伪 | R2 R3 |
+| `cross-execute` | 一串明确、可独立验证的子任务，派**异模型（Codex）在隔离 worktree** 执行、Claude 审 diff（默认关闭，`docs/flow/cross-execute` 在场才启用） | R3 |
 | `subagent-driven-development` | 一串任务逐个派 fresh 子代理 + 双评审（多任务编排外壳） | R2 R3 |
 | `finishing-a-development-branch` | change 收尾：合并 / PR / 丢弃决策，先过 verify+Oracle | R1 R2 R3 |
 | `codebase-analysis` | 陌生/大库先理解内部结构：只读子代理 fan-out → `docs/flow/codemap.md`（架构图+模块+入口+查找表） | R2 R3 |
@@ -69,7 +70,7 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 
 技能之间靠正文里的「下一步去 X 技能」显式交接。每支技能只在被加载时进主上下文，主线程保持干净。
 
-**按需技能（不改判档，卡到/到点才插入）**：调试卡住 → `systematic-debugging`；交付前要独立评审 → `code-review`（与 implement 的对抗 verifier 互补）；高风险面想用异模型增强独立性 → `cross-verify`（把 verifier/reviewer 的执行者换成不同模型/外部 agent）；R2/R3 一串任务要逐个隔离派发 → `subagent-driven-development`；change 收尾合并/PR/丢弃 → `finishing-a-development-branch`。
+**按需技能（不改判档，卡到/到点才插入）**：调试卡住 → `systematic-debugging`；交付前要独立评审 → `code-review`（与 implement 的对抗 verifier 互补）；高风险面想用异模型增强独立性 → `cross-verify`（把 verifier/reviewer 的执行者换成不同模型/外部 agent）；R2/R3 一串任务要逐个隔离派发 → `subagent-driven-development`（R3 且想把执行交给**异模型在隔离 worktree** 跑、Claude 退到审 diff 位 → `cross-execute`，默认关闭、opt-in）；change 收尾合并/PR/丢弃 → `finishing-a-development-branch`。
 
 **分析类（理解优先于动手，多在 plan 前）**：陌生/大库先 `codebase-analysis` 画内部结构图；改前用 `impact-analysis` 算波及面定测试范围；要系统性盘技术债用 `tech-debt-audit`。三者只读、只产结构化制品，不测命令（那是 `profile`）、不查外网（那是 `research`）。
 
