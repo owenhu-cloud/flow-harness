@@ -36,7 +36,9 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 
 确定验证命令后，把能独立裁决「完成」的那条（测试 / 构建命令）写进 `docs/flow/verify-cmd`（单行）。这是 `Stop` hook Oracle（`hooks/flow-oracle.sh`）的燃料：写下它，agent 此后每次收尾都会被独立进程复核，绕不过去。命令变化时同步更新；无可自动验证命令时留空。完成判定由 **verify + Stop hook Oracle** 共同裁决——你绕过 verify，Oracle 仍会拦你。
 
-**喂 B3 健壮性门**：另把"只跑 plan 的 Robustness-Cases 异常路径测试子集"的命令写进 `docs/flow/robustness-cmd`（单行）。Oracle B3 会独立跑它，非 0 即打回，并守其通过数不下降（堵"加 happy-path 测试掩盖删异常测试"）。这把异常覆盖从 implement verifier 的提示词自述，**升级为机器可裁决的硬门**——happy-path 全绿不再等于完成。无独立异常子集命令则留空（B3 零侵入跳过）。`verify-cmd` 与 `robustness-cmd` 都建议纳入版本控制、人审其变更。
+**喂 B3 健壮性门**：另把"只跑 plan 的 Robustness-Cases 异常路径测试子集"的命令写进 `docs/flow/robustness-cmd`（单行）。Oracle B3 会独立跑它，非 0 即打回，并守其通过数不下降（堵"加 happy-path 测试掩盖删异常测试"）。这把异常覆盖从 implement verifier 的提示词自述，**升级为机器可裁决的硬门**——happy-path 全绿不再等于完成。无独立异常子集命令则留空（B3 零侵入跳过）。
+
+**喂 B4 覆盖率门**：有覆盖率工具则把带覆盖率统计的命令写进 `docs/flow/coverage-cmd`（首选自带 `--cov-fail-under` 阈值，退出码即承载地板），可选再设 `docs/flow/coverage-min` 整数地板。B4 抓的是计数门抓不到的"删分支/删错误路径测试→覆盖率下降"（抓不到"同路径假断言"，那需变异）。变异测试**不接 Oracle**（按需/CI 跑），仅由 profile 记 `mutation-cmd`、implement verifier 抽查参照。`verify-cmd`/`robustness-cmd`/`coverage-cmd`/`coverage-min` 都建议纳入版本控制、人审其变更。
 
 ## 按档位跑足深度
 
@@ -61,6 +63,7 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 | 子代理已完成 | VCS diff / 实际文件改动可见 | 子代理回报「已完成」 |
 | 需求满足 | 逐条对照验收清单核过 | 测试过了就当需求满足 |
 | 异常路径健壮 | robustness-cmd 输出 exit 0 + 各 MUST 异常场景对应用例 passed | happy-path 全绿、「应该处理了异常」、只跑正常路径 |
+| 覆盖达标 | coverage-cmd exit 0（自带阈值）或解析覆盖率% ≥ coverage-min | 「覆盖应该够」、只看测试条数没看覆盖率 |
 
 ## 危险信号（出现即停，回退到「执行命令」）
 
