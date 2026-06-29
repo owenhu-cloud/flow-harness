@@ -12,6 +12,11 @@
 #   external-agent.sh dispatch <adapter> <prompt-file> <out-file>
 #       只读对抗验证：prompt-file 派给外部 agent，结构化结果写 out-file。
 #       成功 exit 0；adapter 不可用 exit 3；派发出错 exit 1。
+#   external-agent.sh dispatch-write <adapter> <prompt-file> <out-file> <worktree-dir>
+#       写沙箱执行（cross-execute 用）：在 <worktree-dir> 内以 --sandbox workspace-write
+#       派给外部 agent 落地一个明确子任务（codex exec 非交互、无审批提示），过程输出写 out-file。
+#       退出码同 dispatch（0/3/1）。worktree-dir 必须是 `git worktree add` 产生的隔离 linked
+#       worktree——脚本会校验、拒主工作区/裸目录；审 diff/并行上限由 cross-execute 技能层强制。
 #
 # 适配器键: codex-mcp / codex-cli 均经本地 `codex exec` 派发（CLI 路径）。
 #   skill 层在 opt-in=codex-mcp 且会话内 MCP 工具可用时改走 MCP 工具，本脚本是通用回退
@@ -85,10 +90,56 @@ cmd_dispatch() {
   esac
 }
 
-[ $# -ge 1 ] || die "usage: external-agent.sh <healthcheck|dispatch> ..."
+# 写沙箱派发：在指定 worktree 内执行 agent 落地子任务（cross-execute 专用）。
+# 与 cmd_dispatch 唯一差别：--sandbox workspace-write --ask-for-approval never（允许改文件、
+# 不交互停等）+ 在 <worktree-dir> 作 cwd。其余（防 stdin 挂起、effort、超时、错误归一）同。
+cmd_dispatch_write() {
+  adapter=$1; pf=$2; of=$3; wt=$4
+  [ -f "$pf" ] || die "prompt-file not found: $pf"
+  [ -d "$wt" ] || die "worktree dir not found: $wt"
+  # 隔离红线的【脚本层】防线（不只靠 cross-execute 文档）：写沙箱只许落在隔离的 *linked*
+  # git worktree（`git worktree add` 产生，git-dir 形如 .../.git/worktrees/<n>）。主工作区 /
+  # 裸目录 / 非 git 目录一律拒——挡住「让写权限 agent 在主 checkout 改文件」这个核心危险。
+  command -v git >/dev/null 2>&1 || die "dispatch-write requires git"
+  _gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) \
+    || die "dispatch-write target is not a git worktree: $wt"
+  case "$_gd" in
+    */worktrees/*) : ;;   # linked worktree → 隔离，放行
+    *) die "dispatch-write refuses non-isolated dir (use 'git worktree add'): $wt" ;;
+  esac
+  case "$adapter" in
+    codex-mcp|codex-cli)
+      codex_available || exit 3
+      _err=$(mktemp)
+      _effort_arg="model_reasoning_effort=\"$EFFORT\""
+      _rc=0
+      # 经 sh -c 切到 worktree 再 exec codex：$1=bin $2=cwd $3=effort-arg $4=prompt。
+      # </dev/null 防挂起；workspace-write 沙箱准其在 cwd 改文件。codex exec 本就非交互、无审批
+      # 提示（--ask-for-approval 是 TUI 的，exec 没有），故不传该 flag。已校验是 git worktree，
+      # 不带 --skip-git-repo-check（写模式要求真 repo）。
+      run_timeout "$TIMEOUT" sh -c '
+        cd "$2" || { echo "external-agent: cannot cd to worktree: $2" >&2; exit 1; }
+        exec "$1" exec --sandbox workspace-write -c "$3" "$4"
+      ' external-agent "$CODEX_BIN" "$wt" "$_effort_arg" "$(cat "$pf")" \
+        </dev/null >"$of" 2>"$_err" || _rc=$?
+      if [ "$_rc" -eq 124 ]; then
+        rm -f "$_err"; die "codex dispatch-write timed out after ${TIMEOUT}s (adapter=$adapter)"
+      elif [ "$_rc" -ne 0 ]; then
+        _msg=$(tail -n 5 "$_err" 2>/dev/null | tr '\n' ' '); rm -f "$_err"
+        die "codex dispatch-write failed (adapter=$adapter, rc=$_rc): $_msg"
+      fi
+      rm -f "$_err"
+      [ -s "$of" ] || die "empty dispatch-write output"
+      exit 0 ;;
+    *) die "unknown adapter: $adapter" ;;
+  esac
+}
+
+[ $# -ge 1 ] || die "usage: external-agent.sh <healthcheck|dispatch|dispatch-write> ..."
 sub=$1; shift
 case "$sub" in
   healthcheck) [ $# -eq 1 ] || die "healthcheck <adapter>"; cmd_healthcheck "$1" ;;
   dispatch)    [ $# -eq 3 ] || die "dispatch <adapter> <prompt-file> <out-file>"; cmd_dispatch "$1" "$2" "$3" ;;
+  dispatch-write) [ $# -eq 4 ] || die "dispatch-write <adapter> <prompt-file> <out-file> <worktree-dir>"; cmd_dispatch_write "$1" "$2" "$3" "$4" ;;
   *) die "unknown subcommand: $sub" ;;
 esac
