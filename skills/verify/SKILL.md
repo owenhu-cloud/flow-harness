@@ -36,6 +36,8 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 
 确定验证命令后，把能独立裁决「完成」的那条（测试 / 构建命令）写进 `docs/flow/verify-cmd`（单行）。这是 `Stop` hook Oracle（`hooks/flow-oracle.sh`）的燃料：写下它，agent 此后每次收尾都会被独立进程复核，绕不过去。命令变化时同步更新；无可自动验证命令时留空。完成判定由 **verify + Stop hook Oracle** 共同裁决——你绕过 verify，Oracle 仍会拦你。
 
+**喂 B3 健壮性门**：另把"只跑 plan 的 Robustness-Cases 异常路径测试子集"的命令写进 `docs/flow/robustness-cmd`（单行）。Oracle B3 会独立跑它，非 0 即打回，并守其通过数不下降（堵"加 happy-path 测试掩盖删异常测试"）。这把异常覆盖从 implement verifier 的提示词自述，**升级为机器可裁决的硬门**——happy-path 全绿不再等于完成。无独立异常子集命令则留空（B3 零侵入跳过）。`verify-cmd` 与 `robustness-cmd` 都建议纳入版本控制、人审其变更。
+
 ## 按档位跑足深度
 
 | 档位 | 底线 |
@@ -58,6 +60,7 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 | 回归用例有效 | 红→绿循环都看过（先红后绿） | 只看到过一次绿 |
 | 子代理已完成 | VCS diff / 实际文件改动可见 | 子代理回报「已完成」 |
 | 需求满足 | 逐条对照验收清单核过 | 测试过了就当需求满足 |
+| 异常路径健壮 | robustness-cmd 输出 exit 0 + 各 MUST 异常场景对应用例 passed | happy-path 全绿、「应该处理了异常」、只跑正常路径 |
 
 ## 危险信号（出现即停，回退到「执行命令」）
 
@@ -99,6 +102,7 @@ description: 声明「完成/通过」前用（所有档位）——找出并运
 - [ ] 子代理结论自己复核过 diff/输出，没有直接采信转述。
 - [ ] 报告里没有 should/seems/应该/大概 这类规避措辞。
 - [ ] `docs/flow/verify-cmd` 已同步当前裁决命令（喂给 Oracle）。
+- [ ] 每个 Robustness-Cases 的 MUST 异常场景都有对应用例且 passed；`docs/flow/robustness-cmd` 已写入异常路径测试子集命令（喂给 Oracle B3）。
 
 高风险/高不可逆面想用**异模型**对抗证伪增强独立性（不替代本技能跑命令）→ 用 Skill 工具加载 `cross-verify`。
 

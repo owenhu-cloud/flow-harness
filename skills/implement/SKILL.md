@@ -33,6 +33,7 @@ TDD 循环的完整纪律（每一步该看到什么、何时算真的 RED）见
 - 对照 `references/antipatterns.md`（按项目语言取分区）**+ `project.md` 的项目特异反模式**双重扫描。
 - **不轻信测试存在=测试有效**：抽查测试是否真能 fail——把实现改坏一处看测试是否变红（mutation 心智）。全绿但改坏不报警的测试 = 假测试，按 bug 处理。
 - 发现真 bug → 打回 builder；并记成一条候选经验交给 `harvest`。
+- **错误路径要落成受机器门守护的测试，不止文本自述**：把 plan `Robustness-Cases` 列的 MUST 异常场景逐条写成测试，并纳入 `docs/flow/robustness-cmd` 的子集——这样异常覆盖由 Oracle B3 门裁决（非 0 / 通过数下降即打回），而非仅靠本节"我扫过了"的口述兜底。新增异常测试同样先红后绿（铁律 §1）。
 - **模型独立性升级（异模型可用时）**：基线是 builder ≠ verifier（不同子代理）；当 `docs/flow/cross-verify` 声明了适配器，应进一步做到 **builder 模型 ≠ verifier 模型**——把 verifier 换成异模型/外部 agent（盲点不重叠，更难被同源 sycophancy 骗过）+ **多 change 间轮换谁建谁验** + 喂裁决前**抹除 implementer framing**（别带「这应该没问题」）。→ 用 Skill 工具加载 `cross-verify`（opt-in 多轮闭环；不可用则降级回本基线并显式告知）。
 
 ## 危险信号（出现即停 / 回退重来）
@@ -48,7 +49,7 @@ TDD 循环的完整纪律（每一步该看到什么、何时算真的 RED）见
 
 ## 完成判定 = verify 通过 + 证据（不是你说了算）
 
-builder 自测绿后，**加载 `verify` 技能**按档位跑项目真实 build/test 命令，并在同一轮贴出**新鲜输出**。完成由 verify + Stop hook 的 Oracle（`docs/flow/verify-cmd`）裁决，不由叙述裁决。没有新鲜的通过输出 = 未完成（红线 §1）。
+builder 自测绿后，**加载 `verify` 技能**按档位跑项目真实 build/test 命令，并在同一轮贴出**新鲜输出**。完成由 verify + Stop hook 的 Oracle（`docs/flow/verify-cmd` 验证门 + `docs/flow/robustness-cmd` B3 健壮性门）裁决，不由叙述裁决。没有新鲜的通过输出 = 未完成（红线 §1）。
 
 **封堵自报通过**：不信任子代理「我跑了，过了」的口头汇报——要它回传可核实的**命令 + 新鲜 stdout/退出码**。同义改写一句「测过了」不算证据。
 
@@ -62,6 +63,7 @@ builder 自测绿后，**加载 `verify` 技能**按档位跑项目真实 build/
 - [ ] verify 跑了真实命令，新鲜输出已贴、退出码 0。
 - [ ] verifier 是独立子代理，结论（扫了什么+裁决）已附。
 - [ ] verifier 做过 mutation 抽查，确认测试真能失败。
+- [ ] plan 的 MUST 异常场景已逐条落成测试并纳入 robustness-cmd 子集（受 Oracle B3 守护），非仅文本声明。
 - [ ] 修 bug 时已查同文件/同模块的同类 bug。
 
 ## 红线（反合理化）

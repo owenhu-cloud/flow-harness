@@ -275,5 +275,63 @@ printf 'B\n' > data.txt
 run "ignored-dep changed → FALSE-SKIP (known boundary) → pass" 0 "$NOSTOP"
 assert_file "boundary: ignored-dep skip (cmd ran once)" docs/flow/runmarker RAN
 
+# ---- bignum 基线修复（回归）：超 int64 基线致 [ -lt ] 出错被静默放行 ----
+# 修复前：基线=10^22 时 `[ 5 -lt 10^22 ]` 报 integer expression expected，被 if 当 false → 误放行(0)。
+newdir cBN1; setcmd 'echo "5 passed"; true'
+printf '10000000000000000000000\n' > docs/flow/test-count          # 23 位，超 int64 安全域
+run "bignum baseline (poisoned high) → block (修复前误放行)" 2 "$NOSTOP"
+
+# 输出投毒不再能建立 bignum 基线（>18 位 → 解析为空 → 不写基线）
+newdir cBN2; setcmd 'echo "99999999999999999999 passed"; true'     # 20 位
+run "bignum output → unparseable → pass" 0 "$NOSTOP"
+if [ ! -f docs/flow/test-count ]; then PASS=$((PASS+1)); printf 'PASS  bignum output 不污染基线 (test-count 未建立)\n'
+else FAIL=$((FAIL+1)); printf 'FAIL  bignum output 污染了基线: %s\n' "$(cat docs/flow/test-count)"; fi
+
+# 正常 ≤18 位基线不误伤
+newdir cBN3; setcmd 'echo "100 passed"; true'
+run "normal baseline establish → pass" 0 "$NOSTOP"
+assert_file "normal baseline written" docs/flow/test-count 100
+setcmd 'echo "100 passed"; true'
+run "normal baseline unchanged → pass" 0 "$NOSTOP"
+
+# ---- B3 健壮性门（opt-in：docs/flow/robustness-cmd）----
+# 未 opt-in（无 robustness-cmd）→ 行为同旧，放行
+newdir cR1; setcmd 'echo "3 passed"; true'
+run "B3 not opt-in → pass" 0 "$NOSTOP"
+
+# robustness-cmd 绿 → 放行并建立健壮性基线
+newdir cR2; setcmd 'true'; printf 'echo "2 passed"; true\n' > docs/flow/robustness-cmd
+run "B3 robustness-cmd green → pass" 0 "$NOSTOP"
+assert_file "B3 establishes robustness-count" docs/flow/robustness-count 2
+
+# robustness-cmd 非 0（异常路径测试挂）→ 打回
+newdir cR3; setcmd 'true'; printf 'echo boom; false\n' > docs/flow/robustness-cmd
+run "B3 robustness-cmd fail → block" 2 "$NOSTOP"
+
+# 健壮性通过数下降（异常测试被删/掏空）→ 打回
+newdir cR4; setcmd 'true'; printf 'echo "5 passed"; true\n' > docs/flow/robustness-cmd
+run "B3 establish robustness baseline → pass" 0 "$NOSTOP"
+printf 'echo "2 passed"; true\n' > docs/flow/robustness-cmd
+run "B3 robustness count drop → block" 2 "$NOSTOP"
+
+# robustness-cmd 只有注释 → 视为未配置，跳过放行
+newdir cR5; setcmd 'true'; printf '# todo: add error-path tests\n' > docs/flow/robustness-cmd
+run "B3 comment-only robustness-cmd → skip → pass" 0 "$NOSTOP"
+
+# 核心语义：verify-cmd 绿（happy-path 全绿）但 robustness-cmd 挂 → 整体打回
+newdir cR6; setcmd 'echo "100 passed"; true'; printf 'false\n' > docs/flow/robustness-cmd
+run "B3 happy-path green but error-path red → block" 2 "$NOSTOP"
+
+# 边界⑦：B3 是 verify-cmd opt-in 之上的叠加门——无 verify-cmd 时整体放行，单放 robustness-cmd 不触发 B3
+newdir cR7; printf 'false\n' > docs/flow/robustness-cmd            # 没有 verify-cmd
+run "robustness-cmd alone (no verify-cmd) → opt-out → pass" 0 "$NOSTOP"
+
+# A0 扩展：tracked robustness-cmd（门燃料）在未提交改动中被篡改 → 打回
+newdir cR8; setcmd 'true'; gitinit
+printf 'echo "1 passed"; true\n' > docs/flow/robustness-cmd
+git add -A; git commit -qm base
+printf 'true\n' > docs/flow/robustness-cmd                         # 篡改燃料，未提交
+run "B3 fuel (robustness-cmd) tampered uncommitted → A0 block" 2 "$NOSTOP"
+
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
