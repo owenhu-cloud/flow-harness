@@ -53,13 +53,15 @@ R2/R3 会在两处**停下等你确认**（brainstorm 方向门、plan 设计门
 默认 agent 自带证据声明完成（纪律级）。要让「完成」由**独立进程**裁决、agent 绕不过，接入 Oracle：
 
 1. 首个任务让 agent 跑 `profile`——它探测并写下 `docs/flow/project.md`（你项目真实的 test/build/lint 命令、风格、反模式）与 `docs/flow/verify-cmd`（单行验证命令，如 `npm test`）。
-2. 此后 agent 每次试图收尾，`Stop` hook 都会以独立进程跑三道门：
+2. 此后 agent 每次试图收尾，`Stop` hook 都会以独立进程跑五道门（后两道 opt-in）：
    - **A 完整性门**：扫 git diff，发现删测试 / 注入 `.skip` / 删断言就打回——堵「删测试变绿」。
    - **B 验证命令门**：跑 verify-cmd，非 0 即打回，把失败输出回灌给 agent 继续修。
    - **B2 测试数基线门**：通过测试数掉到基线以下就打回——堵「测试数悄悄变少」。
-3. 任一不过，agent 无法声明完成。未写 verify-cmd 则 Oracle 放行（零侵入）。
+   - **B3 健壮性门**（写 `docs/flow/robustness-cmd` 才生效）：单独跑错误路径/异常场景测试子集，挂了或其通过数下降就打回——堵「只测 happy-path、异常即崩也算完成」。
+   - **B4 覆盖率门**（写 `docs/flow/coverage-cmd` [+ 可选 `coverage-min`] 才生效）：覆盖率命令挂了就打回；若设了合法 `coverage-min`（0..100）且覆盖率能解析出来，低于地板也打回——抓「删分支/删错误路径测试使覆盖率跌破地板」。最稳的接法是让 coverage-cmd 自带 `--cov-fail-under`。
+3. 任一不过，agent 无法声明完成。未写 verify-cmd 则 Oracle 放行（零侵入）；B3/B4 不写对应燃料则跳过。**变异测试不接 Oracle**（太慢会逼你关门），由 profile 记 `mutation-cmd` 供 verifier 抽查/CI 跑。
 
-**让门更可信**：把 `docs/flow/verify-cmd`、`docs/flow/test-count` 提交进版本控制并在 review 时关注其变更（防被改低）。
+**让门更可信**：把 `docs/flow/{verify-cmd,robustness-cmd,coverage-cmd,coverage-min,test-count,robustness-count}` 提交进版本控制并在 review 时关注其变更（防被改低）。
 
 **正当地删/改测试**：确属合理的测试增删（非掩盖失败）时，提交一个 `docs/flow/verify-allow-test-changes` 空文件作显式豁免（须已提交才生效，留审计痕迹）。
 
@@ -86,7 +88,7 @@ R2/R3 会在两处**停下等你确认**（brainstorm 方向门、plan 设计门
 |---|---|---|
 | `research` | 任务新颖 / 不确定，需外部信息 | 派子代理 fan-out，只回传带引用的结论。**浅档**默认；**深档**（高风险/不可逆决策）加对抗证伪回环 + 引用完整性校验 + 源可信度分级 + 落盘，并以 `verify-citations.sh` 做收尾硬门（每断言 ≥3 独立源、URL 可达，不过不算完成） |
 | `brainstorm` | R2/R3 方向未定 | 苏格拉底澄清 + 2–4 个本质不同候选 + 取舍，收敛到一个方向（需你明确点头才进 plan）。Flow 的「规格澄清」即在此 |
-| `plan` | 方向已定 | `design.md`（Context/Decisions/Risks/Migration/Open-Questions）+ `tasks.md`（编号、每条带可运行的验证方式）。进门不再发散 |
+| `plan` | 方向已定 | `design.md`（Context/Decisions/Robustness-Cases/Risks/Migration/Open-Questions）+ `tasks.md`（按复杂度+SOLID 切：简单直接做、复杂沿 SRP/DIP 拆，每条带可运行验证方式）。R3/高风险面默认跨模型审方案。进门不再发散 |
 
 ### 实现与验证
 
