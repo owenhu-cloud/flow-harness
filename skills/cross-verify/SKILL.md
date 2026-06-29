@@ -7,6 +7,7 @@ description: 高风险/高不可逆 change 想用「不同模型/外部 agent」
 
 把独立 verifier / reviewer 的**执行者从「同模型子代理」升级为「不同模型 / 外部 agent」**，用模型异质性消除同源盲点。
 **它升级「谁来验」，不新增「验什么」** —— 不是又一类检查，而是给既有对抗验证换一个独立大脑。
+**且是多轮收敛闭环**：派发 → 摄取裁决 → 回修 → 再派，直到无 Critical 或用户显式接受残留——不是「派一次、看一眼」。
 
 ## 适用档位 + 位置
 
@@ -33,11 +34,17 @@ cross-verify 不替 `verify` 跑命令，也不替 `implement`/`code-review` 定
 4. **builder ≠ verifier 仍成立且被强化。** 跨模型天然满足角色分离；但 builder 不得当外部 verifier 的「转述人」**挑好听的报**——回传须原样可审计。
 5. **完成仍由 `verify` 新鲜输出裁决。** 跨模型 verifier 说「没问题」**不替代**真实 build/test 命令证据；完成判定永远回 `verify` + Stop hook Oracle。
 
-## 派发协议（抽象，工具无关）
+## 派发协议：多轮对抗闭环（工具无关）
 
-喂给外部 verifier：**change 描述 + 真实 diff / 范围 + 期望行为 + 明确指令「对抗证伪，默认怀疑而非信任」**。
-要求**结构化回传**：裁决（真问题 / 无发现）+ 每条 文件:行 + 复现或命令。
-具体怎么调（MCP 工具 / CLI、健康检查、项目 opt-in 写法）→ 见 `references/adapters.md`。
+不是「派一次、看一眼」，而是一个收敛闭环——直到无 Critical 或用户显式接受残留：
+
+1. **派发**：经 `references/external-agent.sh dispatch <adapter> <prompt-file> <out-file>` 把 **change 描述 + 真实 diff/范围 + 期望行为 + 「对抗证伪，默认怀疑而非信任」** 喂外部 verifier，要求**结构化回传**（裁决 + 每条 级别/文件:行 + 复现/命令）。健康检查失败（exit 3）→ 降级回同模型并显式告知（铁律 §2）。
+2. **摄取裁决**：读 out-file，**自己复核 diff** 核实每条（铁律 §3）；不盲信自报、不挑好看的贴（铁律 §4）。
+3. **回修**：有 Critical/Major → 回 `implement` 的 builder 修（builder ≠ verifier，不得自演转述）。
+4. **再轮**：修完**重派同一闭环**，直到无 Critical（Major 经修复或技术性反驳清零）或用户显式接受残留。
+5. **收敛后**：完成仍由 `verify` 新鲜输出 + Stop hook Oracle 裁决（铁律 §5），跨模型「没问题」不顶替命令证据。
+
+适配器 / 健康检查 / opt-in 写法 / 派发器内部细节 → 见 `references/adapters.md`。
 
 ## 危险信号（出现即停 / 回退）
 
@@ -45,6 +52,7 @@ cross-verify 不替 `verify` 跑命令，也不替 `implement`/`code-review` 定
 - 适配器不可用却**静默当跑过**，或不告知降级。
 - 外部裁决**照单全收**不复核 diff，或外部「没问题」就跳过 `verify`。
 - 只贴外部报告里**好看的部分**，把它报的 Critical 藏掉。
+- **派一次就收**：报了 Critical/Major 却不回修、不再派下一轮，直接标完成。
 - 用 `should / seems / 应该 / 大概` 描述外部验证结果。
 
 任一命中 → 停，回对应铁律重做。

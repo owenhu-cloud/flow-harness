@@ -33,7 +33,7 @@ TDD 循环的完整纪律（每一步该看到什么、何时算真的 RED）见
 - 对照 `references/antipatterns.md`（按项目语言取分区）**+ `project.md` 的项目特异反模式**双重扫描。
 - **不轻信测试存在=测试有效**：抽查测试是否真能 fail——把实现改坏一处看测试是否变红（mutation 心智）。全绿但改坏不报警的测试 = 假测试，按 bug 处理。
 - 发现真 bug → 打回 builder；并记成一条候选经验交给 `harvest`。
-- **高风险/高不可逆面想增强独立性**：verifier 可从同模型子代理**升级为不同模型/外部 agent** → 用 Skill 工具加载 `cross-verify`（opt-in，不可用则降级回本基线并显式告知）。
+- **模型独立性升级（异模型可用时）**：基线是 builder ≠ verifier（不同子代理）；当 `docs/flow/cross-verify` 声明了适配器，应进一步做到 **builder 模型 ≠ verifier 模型**——把 verifier 换成异模型/外部 agent（盲点不重叠，更难被同源 sycophancy 骗过）+ **多 change 间轮换谁建谁验** + 喂裁决前**抹除 implementer framing**（别带「这应该没问题」）。→ 用 Skill 工具加载 `cross-verify`（opt-in 多轮闭环；不可用则降级回本基线并显式告知）。
 
 ## 危险信号（出现即停 / 回退重来）
 
