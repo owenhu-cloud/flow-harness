@@ -2,11 +2,15 @@
 # Flow 治"自说自话"：独立 Oracle。agent 试图结束（Stop）时，由本 hook —— 一个
 # 与 agent 无关的进程 —— 裁决"完成"。完成不再由 agent 自说自话，而由机制裁决。
 #
-# 三道独立门，任一不过即 exit 2 打回：
+# 四道独立门，任一不过即 exit 2 打回：
 #   A. 完整性门：扫 git diff，禁止靠删测试 / 注入 skip / 删断言来"变绿"（语法层守卫）。
 #   B. 验证命令门：跑 docs/flow/verify-cmd，退出码即裁决。
 #   B2. 测试数基线门：解析 runner 输出的"通过数"，低于 docs/flow/test-count 即打回
 #       （语义层守卫——抓 grep 抓不到的"测试数下降"，如删测试/skip 的等价变体）。
+#   B3. 健壮性门（opt-in：docs/flow/robustness-cmd 存在时）：单独跑错误路径/异常场景测试子集，
+#       非 0 或通过数低于 docs/flow/robustness-count 即打回（治"只测 happy-path 即判完成"——
+#       异常路径覆盖从 implement verifier 的提示词自述，升级为机器可裁决的硬门）。
+#       B2/B3 的通过数比较共用 check_count_baseline()，并在此修复 bignum 基线致比较出错被静默放行的缺陷。
 # 降本（严格 opt-in）：存在 docs/flow/verify-cache 时，状态指纹与上次绿相同即跳过全部门。
 #   默认关闭 → 行为不变；仅 git、指纹保守、非 git/失败即回退到"跑"。已知 false-skip 边界：
 #     ① 指纹用 --exclude-standard：.gitignore 的测试依赖（.env/fixtures/本地 DB）改动不触发
@@ -28,12 +32,22 @@
 #     ④ agent 直接覆写 hooks/flow-oracle.sh / verify-cmd / test-count 自身——
 #        脚本无法防自身字节被改；基线文件可被改低（故建议纳入版本控制、人审其变更）。
 #   B2 基线门特有的语义层边界（同样需覆盖率/变异 + 人审才能根治）：
-#     ⑤ 解析的是 runner 输出文本，agent 可影响：测试内 print("999 passed") 可向上伪造计数；
-#        reporter 不匹配任一正则时 B2 降级放行（unparseable=放行），改 reporter/吞摘要即绕过。
+#     ⑤ 解析的是 runner 输出文本，agent 可影响：测试内 print("999 passed") 可向上伪造计数。
+#        （已收紧）"建立过数值基线后又变不可解析"现按绕过处理→打回（check_count_baseline）；
+#        仍存的窗口：基线建立之前就吞摘要/不可解析，则首次即无基线可比（需覆盖率/变异根治）。
 #     ⑥ 首次建立的基线是 TOFU（trust-on-first-use，未经核验）：先弱化再首绿会把地板锁低位，
 #        "0 passed" 锁 0 即永久失效。故 docs/flow/test-count 应提交并人审，且依赖完整性门 A
 #        拦截已跟踪测试的掏空（B2 与 A 互补，非替代）。
-#   为让门生效，建议把 docs/flow/{verify-cmd,test-count,verify-allow-test-changes} 纳入版本控制并人审其变更。
+#   B3 健壮性门特有边界（与 B2 同源，不夸大）：
+#     ⑦ B3 是 verify-cmd opt-in 之上的叠加门：未写 verify-cmd 时整体在"未 opt-in 早退"处即放行，
+#        单放 robustness-cmd 不会触发 B3。verify 技能要求两文件一并写入（测试存在后才落）。
+#     ⑧ robustness-count 同样是 TOFU + 可被改低（threat ④/⑥同理）；科学计数法等被篡改成小数的
+#        基线（grep 取首个数字段 → 1e+30 读成 1）等价于"基线改低"，靠提交+人审 robustness-count 兜底。
+#     ⑨ 开 verify-cache 后，指纹排除 docs/flow/ → 仅改低 robustness-count 不变指纹会被 false-skip
+#        （与 B2/test-count 完全同源的已知边界）；故 verify-cache 严格 opt-in、默认关。
+#     注：bignum 基线（>18 位）现由 _plausible_count 拦下——纯数字超界打回、解析侧截断为不可解析，
+#        不再出现"比较出错被静默吞成 false → 测试数暴跌反放行"（见 B2/B3 回归测试 cBN1/cBN2）。
+#   为让门生效，建议把 docs/flow/{verify-cmd,robustness-cmd,test-count,robustness-count,verify-allow-test-changes} 纳入版本控制并人审其变更。
 #
 # 严格 opt-in：仅当 docs/flow/verify-cmd 存在且非空时整体生效（由 profile / verify 写入）；
 # 不存在则立即放行（零侵入）。命中 stop_hook_active 则放行，避免死循环。
@@ -48,6 +62,8 @@ esac
 CMD_FILE="docs/flow/verify-cmd"
 ALLOW_FILE="docs/flow/verify-allow-test-changes"
 COUNT_FILE="docs/flow/test-count"
+RCMD_FILE="docs/flow/robustness-cmd"     # B3 健壮性门的燃料（错误路径/异常场景测试子集命令）
+RCOUNT_FILE="docs/flow/robustness-count" # B3 的通过数基线（守异常路径测试不被悄悄删/掏空）
 [ -f "$CMD_FILE" ] || exit 0          # 未 opt-in：放行
 CMD=$(grep -v '^[[:space:]]*#' "$CMD_FILE" | grep -v '^[[:space:]]*$' \
       | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
@@ -68,7 +84,7 @@ override_active() {
   return 0
 }
 
-# 从 runner 输出解析"通过测试数"。命中即回，未识别回空（→ 降级放行，不误门控）。
+# 从 runner 输出解析"通过测试数"。命中即回，未识别回空（放行/打回由 check_count_baseline 据"有无基线"裁决）。
 # 多 suite/多 package 输出按同格式**求和**（非 tail）：顺序无关、消除并行交错抖动。
 # 只要解析确定性，绝对精度不重要：建立与比较用同一解析，地板自洽。
 extract_count() {
@@ -80,7 +96,58 @@ extract_count() {
     _c=$(printf '%s\n' "$_o" | grep -cE '^[[:space:]]*--- PASS:')   # go test -v
     [ "$_c" -gt 0 ] && _n=$_c
   fi
+  # 防 bignum 投毒：runner 输出里的 "99999999999999999999 passed" 会被求和成超 int64 的数，
+  # 一旦写进基线，后续 `[ -lt ]` 比较出错被静默吞成 false → 测试数暴跌反被放行。
+  # 源头截断：>18 位（必超真实测试规模、且超 int64 安全域）一律视为无法解析（不污染基线；后续放行/打回同样由 check_count_baseline 据有无基线裁决）。
+  _plausible_count "$_n" || _n=''
   printf '%s' "$_n"
+}
+
+# 合法通过数判定：非空、纯数字、且 ≤18 位（保证落在 int64 安全比较域，杜绝 bignum 比较出错）。
+_plausible_count() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "${#1}" -le 18 ]
+}
+
+# 统一的"通过数基线门"：解析输出通过数，与基线比较。B2/B3 共用——bignum 修复只在此一处。
+# 返回 0=放行（含首次建立 / 正当下降刷新），2=打回（信息走 stderr）。
+# 基线值超出可信整数域（>18 位）→ 几乎必为篡改/损坏，打回而非静默放行（堵 bignum 误裁决）。
+check_count_baseline() {
+  _out=$1; _cf=$2; _label=$3
+  _cur=$(extract_count "$_out")
+  if [ -z "$_cur" ]; then
+    # 解析不出通过数。无基线 → 降级放行（establish 前无可比，不误门控）。
+    # 但"已建立过数值基线却本轮解析不出"= 异常：换 reporter / 吞测试摘要以绕过计数门（威胁⑤）。
+    # → 打回（已提交豁免可接受正当的 reporter/命令更换）。收紧"unparseable 一律放行"的盲点。
+    if [ -f "$_cf" ] && [ -n "$(grep -oE '[0-9]+' "$_cf" 2>/dev/null | head -n1)" ]; then
+      override_active && return 0
+      printf '[Flow Oracle] %s未通过：已建立通过数基线，但本轮输出解析不出通过数，疑换 reporter/吞测试摘要以绕过计数门。\n' "$_label" >&2
+      printf '若确为正当更换验证命令/reporter，更新或删除基线 %s 后重建，或提交 %s 接受变更（留审计痕迹）。\n' "$_cf" "$ALLOW_FILE" >&2
+      return 2
+    fi
+    return 0
+  fi
+  if [ -f "$_cf" ]; then
+    _base=$(grep -oE '[0-9]+' "$_cf" | head -n1)
+    [ -n "$_base" ] || return 0                     # 基线无数字（垃圾文件）→ 跳过比较（保守）
+    if ! _plausible_count "$_base"; then
+      printf '[Flow Oracle] %s未通过：基线值 %s 超出可信整数域（>18 位），疑被篡改/损坏。\n' "$_label" "$_base" >&2
+      printf '请人工核对并修正 %s（应为正常的通过测试数），再收尾。\n' "$_cf" >&2
+      return 2
+    fi
+    if [ "$_cur" -lt "$_base" ]; then
+      if override_active; then
+        printf '%s\n' "$_cur" > "$_cf"               # 正当下降（已提交豁免）→ 刷新基线
+      else
+        printf '[Flow Oracle] %s未通过：通过数从基线 %s 跌到 %s，疑掏空/删/skip 测试。\n' "$_label" "$_base" "$_cur" >&2
+        printf '挂了就是没过，恢复测试或修实现；若为正当删减，提交 %s 后再收尾（留审计痕迹）。\n' "$ALLOW_FILE" >&2
+        return 2
+      fi
+    fi
+  else
+    printf '%s\n' "$_cur" > "$_cf"                    # 首次绿：建立基线
+  fi
+  return 0
 }
 
 # 可移植哈希（变更检测用）：优先 shasum/sha1sum，回退 cksum。
@@ -102,6 +169,7 @@ verify_fingerprint() {
     git ls-files --others --exclude-standard -- . "$EXCL" 2>/dev/null \
       | while IFS= read -r _f; do printf '== %s\n' "$_f"; cat "$_f" 2>/dev/null; done
     cat "$CMD_FILE" 2>/dev/null
+    cat "$RCMD_FILE" 2>/dev/null                  # B3 燃料变更须使缓存失效（否则改 robustness-cmd 后 false-skip）
     git rev-parse --show-toplevel 2>/dev/null    # 仓库绝对路径 + 机器身份：
     uname -srm 2>/dev/null                        # 令被提交/共享的 .last-green 在异机/异路径不误匹配
   } | _hash
@@ -128,10 +196,10 @@ if command -v git >/dev/null 2>&1 \
    && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
    && git rev-parse --verify HEAD >/dev/null 2>&1; then
 
-  # A0. verify-cmd（门的"燃料"）在未提交改动中被改 → 不可信，打回（仅 tracked 可查）。
-  if git diff HEAD -- "$CMD_FILE" 2>/dev/null | grep -q .; then
+  # A0. 门的"燃料"（verify-cmd / robustness-cmd）在未提交改动中被改 → 不可信，打回（仅 tracked 可查）。
+  if git diff HEAD -- "$CMD_FILE" "$RCMD_FILE" 2>/dev/null | grep -q .; then
     {
-      printf '[Flow Oracle] 完整性门未通过：docs/flow/verify-cmd（门的燃料）在未提交改动中被修改，不可信。\n'
+      printf '[Flow Oracle] 完整性门未通过：docs/flow/verify-cmd 或 robustness-cmd（门的燃料）在未提交改动中被修改，不可信。\n'
       printf '若为正当更新验证命令，请先提交该文件再收尾（留审计痕迹）；否则恢复原命令。\n'
     } >&2
     exit 2
@@ -199,23 +267,29 @@ fi
 # ---------- B2. 测试数基线门（命令已绿）----------
 # 解析通过数；与基线比。缺失则建立（establish-if-missing），低于基线即打回。
 # 不向上 ratchet（避免 env 波动把地板锁到高水位后误门控）；正当下降经已提交豁免接受并刷新。
-CUR=$(extract_count "$OUT")
-if [ -n "$CUR" ]; then
-  if [ -f "$COUNT_FILE" ]; then
-    BASE=$(grep -oE '[0-9]+' "$COUNT_FILE" | head -n1)
-    if [ -n "$BASE" ] && [ "$CUR" -lt "$BASE" ]; then
-      if override_active; then
-        printf '%s\n' "$CUR" > "$COUNT_FILE"     # 接受正当下降，刷新基线
-      else
-        {
-          printf '[Flow Oracle] 测试数基线门未通过：通过测试数从基线 %s 跌到 %s，疑似掏空/删/skip 测试。\n' "$BASE" "$CUR"
-          printf '挂了就是没过，恢复测试或修实现；若为正当删减，提交 %s 后再收尾（留审计痕迹）。\n' "$ALLOW_FILE"
-        } >&2
-        exit 2
-      fi
+check_count_baseline "$OUT" "$COUNT_FILE" "测试数基线门" || exit 2
+
+# ---------- B3. 健壮性门（命令已绿；严格 opt-in：docs/flow/robustness-cmd 存在且非空时生效）----------
+# 治"只测 happy-path 就判完成"：单独跑错误路径/异常场景测试子集，强制其存在且全绿、通过数不下降。
+# 与 verify-cmd 正交——B2 数全量、happy-path 增测可掩盖异常测试被删；B3 单独守异常路径子集。
+# 不存在 robustness-cmd → 跳过（零侵入，行为同旧）。门由 plan 的 Robustness-Cases 契约 + verify 写入燃料。
+if [ -f "$RCMD_FILE" ]; then
+  RCMD=$(grep -v '^[[:space:]]*#' "$RCMD_FILE" | grep -v '^[[:space:]]*$' \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
+  if [ -n "$RCMD" ]; then
+    ROUT=$(sh -c "$RCMD" 2>&1)
+    RCODE=$?
+    if [ "$RCODE" -ne 0 ]; then
+      {
+        printf '[Flow Oracle] 健壮性门未通过（robustness-cmd 退出码 %s），异常/错误路径测试未全绿，不得声明完成。\n' "$RCODE"
+        printf '命令：%s\n' "$RCMD"
+        printf -- '--- 输出末 40 行 ---\n'
+        printf '%s\n' "$ROUT" | tail -n 40
+        printf 'happy-path 全绿不等于完成：修实现直到异常路径测试也绿（红线 §1/§3）。\n'
+      } >&2
+      exit 2
     fi
-  else
-    printf '%s\n' "$CUR" > "$COUNT_FILE"          # 首次绿：建立基线
+    check_count_baseline "$ROUT" "$RCOUNT_FILE" "健壮性数基线门" || exit 2
   fi
 fi
 
