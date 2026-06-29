@@ -351,5 +351,83 @@ run "unparseable + override → pass" 0 "$NOSTOP"
 newdir cU3; setcmd 'true'                                          # 无通过数、无基线
 run "no baseline + unparseable → pass (no false-block)" 0 "$NOSTOP"
 
+# ---- B4 覆盖率门（opt-in：docs/flow/coverage-cmd）----
+setcov() { printf '%s\n' "$1" > "$WORK/docs/flow/coverage-cmd"; }
+
+# 未 opt-in（无 coverage-cmd）→ 行为同旧
+newdir cV1; setcmd 'true'
+run "B4 not opt-in → pass" 0 "$NOSTOP"
+
+# coverage-cmd 退出码非 0（项目自带 --cov-fail-under 失败）→ 打回
+newdir cV2; setcmd 'true'; setcov 'echo "coverage: 70%"; false'
+run "B4 coverage-cmd nonzero (own threshold) → block" 2 "$NOSTOP"
+
+# coverage-cmd 绿、无 coverage-min → 放行（仅退出码裁决）
+newdir cV3; setcmd 'true'; setcov 'echo "coverage: 87.5% of statements"; true'
+run "B4 coverage-cmd green, no min → pass" 0 "$NOSTOP"
+
+# 关键：小数覆盖率取整数部分（catches 'tail digit' parse bug）——87.5 取 87 ≥ 80 → 放行
+newdir cV4a; setcmd 'true'; setcov 'echo "coverage: 87.5% of statements"; true'; printf '80\n' > docs/flow/coverage-min
+run "B4 decimal 87.5→87 >= 80 floor → pass (int-part parse)" 0 "$NOSTOP"
+
+# coverage-min 地板：覆盖率低于地板 → 打回（go 小数格式，73.4→73）
+newdir cV4; setcmd 'true'; setcov 'echo "coverage: 73.4% of statements"; true'; printf '80\n' > docs/flow/coverage-min
+run "B4 coverage 73.4→73 < 80 floor → block" 2 "$NOSTOP"
+
+# go tool cover -func 的 total: 行 + 达标 → 放行
+newdir cV5; setcmd 'true'; setcov 'printf "main.go:1:\tF\t100.0%%\ntotal:\t(statements)\t91.2%%\n"; true'; printf '80\n' > docs/flow/coverage-min
+run "B4 go total: 91.2→91 >= 80 → pass" 0 "$NOSTOP"
+
+# coverage.py TOTAL 小数 + 达标 → 放行（验证 TOTAL 行也取整数部分而非小数）
+newdir cV5b; setcmd 'true'; setcov 'printf "Name  Stmts  Miss  Cover\nTOTAL  100  5  95.5%%\n"; true'; printf '80\n' > docs/flow/coverage-min
+run "B4 TOTAL 95.5→95 >= 80 → pass" 0 "$NOSTOP"
+
+# 边界：79.9 截整为 79 < 80 → 打回（保守偏严，正确）
+newdir cV6; setcmd 'true'; setcov 'echo "coverage: 79.9%"; true'; printf '80\n' > docs/flow/coverage-min
+run "B4 coverage 79.9→79 < 80 → block" 2 "$NOSTOP"
+
+# 解析不出覆盖率%（无 total:/TOTAL/coverage: 上下文）+ 有地板 → 降级为仅退出码裁决（不误打回，不 fail-open 噪声）
+newdir cV7; setcmd 'true'; setcov 'echo "All files 78 done; 100% complete"; true'; printf '90\n' > docs/flow/coverage-min
+run "B4 noise '100% complete' no ctx → degrade to exit-code → pass" 0 "$NOSTOP"
+
+# coverage-min 非法/超界 → 地板跳过（降级仅退出码），不致 [ -lt ] 出错
+newdir cV7b; setcmd 'true'; setcov 'echo "coverage: 10%"; true'; printf '99999999999999999999999\n' > docs/flow/coverage-min
+run "B4 bignum coverage-min → floor skipped → pass (no crash)" 0 "$NOSTOP"
+# 且确认无 shell 比较报错泄漏到 stderr
+printf '%s' "$NOSTOP" | sh "$ORACLE" >/dev/null 2>"$TMP/cverr"
+if grep -qi 'integer expression\|not found\|unexpected' "$TMP/cverr"; then
+  FAIL=$((FAIL+1)); printf 'FAIL  bignum coverage-min leaked shell error\n'; sed 's/^/    /' "$TMP/cverr"
+else PASS=$((PASS+1)); printf 'PASS  bignum coverage-min: no shell error on stderr\n'; fi
+
+# coverage-min=101（>100，非法）→ 视为未设地板 → 低覆盖也放行（证明非法地板被忽略而非误用）
+newdir cV7c; setcmd 'true'; setcov 'echo "coverage: 10%"; true'; printf '101\n' > docs/flow/coverage-min
+run "B4 invalid coverage-min=101 → floor ignored → pass" 0 "$NOSTOP"
+
+# coverage-min=79.5（小数，非法）→ 视为未设地板 → 放行
+newdir cV7d; setcmd 'true'; setcov 'echo "coverage: 10%"; true'; printf '79.5\n' > docs/flow/coverage-min
+run "B4 decimal coverage-min=79.5 → floor ignored → pass" 0 "$NOSTOP"
+
+# coverage-min=abc（非数字）→ 视为未设地板 → 放行
+newdir cV7e; setcmd 'true'; setcov 'echo "coverage: 10%"; true'; printf 'abc\n' > docs/flow/coverage-min
+run "B4 non-numeric coverage-min=abc → floor ignored → pass" 0 "$NOSTOP"
+
+# 边界值：coverage 100.0% >= 地板 100 → 放行（整数部分 100）
+newdir cV7f; setcmd 'true'; setcov 'echo "coverage: 100.0% of statements"; true'; printf '100\n' > docs/flow/coverage-min
+run "B4 coverage 100.0→100 >= 100 floor → pass" 0 "$NOSTOP"
+
+# A0：tracked coverage-cmd 未提交篡改 → 打回
+newdir cV8; setcmd 'true'; gitinit
+setcov 'echo "coverage: 90%"; true'; printf '80\n' > docs/flow/coverage-min
+git add -A; git commit -qm base
+setcov 'true'                                                     # 篡改燃料，未提交
+run "B4 fuel (coverage-cmd) tampered uncommitted → A0 block" 2 "$NOSTOP"
+
+# A0：tracked coverage-min 被未提交改低（绕过地板）→ 打回
+newdir cV9; setcmd 'true'; gitinit
+setcov 'echo "coverage: 50%"; true'; printf '80\n' > docs/flow/coverage-min
+git add -A; git commit -qm base
+printf '1\n' > docs/flow/coverage-min                            # 偷偷把地板改到 1，未提交
+run "B4 coverage-min lowered uncommitted → A0 block" 2 "$NOSTOP"
+
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

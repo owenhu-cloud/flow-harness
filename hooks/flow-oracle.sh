@@ -2,7 +2,7 @@
 # Flow 治"自说自话"：独立 Oracle。agent 试图结束（Stop）时，由本 hook —— 一个
 # 与 agent 无关的进程 —— 裁决"完成"。完成不再由 agent 自说自话，而由机制裁决。
 #
-# 四道独立门，任一不过即 exit 2 打回：
+# 五道独立门，任一不过即 exit 2 打回：
 #   A. 完整性门：扫 git diff，禁止靠删测试 / 注入 skip / 删断言来"变绿"（语法层守卫）。
 #   B. 验证命令门：跑 docs/flow/verify-cmd，退出码即裁决。
 #   B2. 测试数基线门：解析 runner 输出的"通过数"，低于 docs/flow/test-count 即打回
@@ -11,6 +11,12 @@
 #       非 0 或通过数低于 docs/flow/robustness-count 即打回（治"只测 happy-path 即判完成"——
 #       异常路径覆盖从 implement verifier 的提示词自述，升级为机器可裁决的硬门）。
 #       B2/B3 的通过数比较共用 check_count_baseline()，并在此修复 bignum 基线致比较出错被静默放行的缺陷。
+#   B4. 覆盖率门（opt-in：docs/flow/coverage-cmd 存在时）：跑带覆盖率统计的测试命令，退出码非 0 即打回；
+#       若设 docs/flow/coverage-min 地板，解析覆盖率% 低于地板亦打回（解析不出则仅退出码裁决）。
+#       B4 是"绝对地板"——覆盖率低于 coverage-min（或 coverage-cmd 自带阈值）即打回，非动态基线/ratchet。
+#       它能抓"删分支/删错误路径测试使覆盖率跌破地板"（计数门抓不到）；但：地板设太低则跌而未破不拦（见⑬），
+#       且抓不到"同路径假断言"（expect(x).toBe(y)→expect(true).toBe(true) 路径不变、覆盖率不降）——那需变异，见⑩。
+#       变异测试刻意不入本门（每次收尾跑变异分钟级、会逼用户关掉整个 Oracle）；见威胁模型⑩。
 # 降本（严格 opt-in）：存在 docs/flow/verify-cache 时，状态指纹与上次绿相同即跳过全部门。
 #   默认关闭 → 行为不变；仅 git、指纹保守、非 git/失败即回退到"跑"。已知 false-skip 边界：
 #     ① 指纹用 --exclude-standard：.gitignore 的测试依赖（.env/fixtures/本地 DB）改动不触发
@@ -47,7 +53,20 @@
 #        （与 B2/test-count 完全同源的已知边界）；故 verify-cache 严格 opt-in、默认关。
 #     注：bignum 基线（>18 位）现由 _plausible_count 拦下——纯数字超界打回、解析侧截断为不可解析，
 #        不再出现"比较出错被静默吞成 false → 测试数暴跌反放行"（见 B2/B3 回归测试 cBN1/cBN2）。
-#   为让门生效，建议把 docs/flow/{verify-cmd,robustness-cmd,test-count,robustness-count,verify-allow-test-changes} 纳入版本控制并人审其变更。
+#   B4 覆盖率门特有边界：
+#     ⑩ 变异测试不入 Stop 门（每次收尾跑变异分钟级、会逼用户关掉整个 Oracle）。①同数语义掏空的
+#        最终根治仍需变异——B4 覆盖率只是"分钟内可跑"的代理（覆盖率绿≠断言有效，仅"行/分支被跑到"）。
+#        变异留在 implement verifier 的 mutation 抽查 + profile 的可选 mutation-cmd（人按需/CI 周期跑，非 Stop 门）。
+#     ⑪ 覆盖率% 解析仅认 total:/TOTAL/coverage: 三类总计上下文，取整数部分；其它格式（istanbul 表格、
+#        多包 go test -cover 无 total: 总计行时只能取最后一包）解析不可靠——故强烈建议 coverage-cmd 自带
+#        --cov-fail-under 等阈值或用 `go tool cover -func`(有 total:)，让退出码即承载地板，不依赖本解析。
+#        解析不出则降级仅退出码裁决；coverage-min 非 0..100 纯整数亦视为未设地板（降级），不误解析。
+#     ⑫ coverage-min 可被改低（threat④同理）→ 建议提交并人审；A0 与缓存指纹已把 coverage-cmd 与 coverage-min
+#        一并纳入（未提交改低即被 A0 拦），但已提交的改低仍依赖人审 diff。coverage-min 非整数/超界 → 地板跳过（降级仅退出码）。
+#     ⑬ B4 是绝对地板、非动态基线（刻意）：覆盖率 run 间抖动（并行/flaky/env）比测试通过数大得多，
+#        若像 B2/B3 那样 ratchet 到高水位，92.1%→92.0% 的正常抖动就会误门控。故 B4 不自动建基线——
+#        要把 coverage-min 设到有意义的水平，靠它兜底；"跌而未破地板"（92→78 但 min=70）B4 不拦，是地板语义的固有取舍。
+#   为让门生效，建议把 docs/flow/{verify-cmd,robustness-cmd,coverage-cmd,coverage-min,test-count,robustness-count,verify-allow-test-changes} 纳入版本控制并人审其变更。
 #
 # 严格 opt-in：仅当 docs/flow/verify-cmd 存在且非空时整体生效（由 profile / verify 写入）；
 # 不存在则立即放行（零侵入）。命中 stop_hook_active 则放行，避免死循环。
@@ -64,6 +83,8 @@ ALLOW_FILE="docs/flow/verify-allow-test-changes"
 COUNT_FILE="docs/flow/test-count"
 RCMD_FILE="docs/flow/robustness-cmd"     # B3 健壮性门的燃料（错误路径/异常场景测试子集命令）
 RCOUNT_FILE="docs/flow/robustness-count" # B3 的通过数基线（守异常路径测试不被悄悄删/掏空）
+COV_FILE="docs/flow/coverage-cmd"        # B4 覆盖率门的燃料（带覆盖率统计的测试命令）
+COVMIN_FILE="docs/flow/coverage-min"     # B4 的覆盖率地板（整数百分比；缺省则只看 coverage-cmd 退出码）
 [ -f "$CMD_FILE" ] || exit 0          # 未 opt-in：放行
 CMD=$(grep -v '^[[:space:]]*#' "$CMD_FILE" | grep -v '^[[:space:]]*$' \
       | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
@@ -150,6 +171,23 @@ check_count_baseline() {
   return 0
 }
 
+# 从 coverage 工具输出解析"总覆盖率百分比的整数部分"。识别不出回空（→ 仅退出码裁决，不猜，避免误解析致 fail-open）。
+# 仅认可可靠的"总计"上下文（优先级递降），不对全文末个 % 瞎猜（"100% done"之类噪声会 fail-open）：
+#   ① go `go tool cover -func` 的 `total:` 行  ② coverage.py/pytest-cov 的 `TOTAL` 行  ③ go test -cover 的 `coverage: NN%`
+# 取整数部分（小数点/百分号之前）做地板比较：87.5→87、79.9→79（对 ">=min" 保守偏严，正确——79.9 确实 < 80）。
+# 其它工具（istanbul 表格等）建议靠 coverage-cmd 自带 --cov-fail-under，退出码即承载地板，不依赖本解析。
+extract_coverage() {
+  _co=$1; _ctx=''; _cv=''
+  _ctx=$(printf '%s\n' "$_co" | grep -iE '^[[:space:]]*total:' | tail -n1)            # go func 总计
+  [ -z "$_ctx" ] && _ctx=$(printf '%s\n' "$_co" | grep -iE '^[[:space:]]*TOTAL[[:space:]]' | tail -n1)  # coverage.py TOTAL
+  [ -z "$_ctx" ] && _ctx=$(printf '%s\n' "$_co" | grep -iE 'coverage:[[:space:]]*[0-9]' | tail -n1)     # go test -cover
+  [ -n "$_ctx" ] || { printf ''; return 0; }
+  # 从上下文取最后一个 NN(.N)?% 形态，再切出整数部分（% 与小数点之前）。
+  _cv=$(printf '%s\n' "$_ctx" | grep -oE '[0-9]+(\.[0-9]+)?%' | tail -n1 | grep -oE '^[0-9]+')
+  _plausible_count "$_cv" || _cv=''
+  printf '%s' "$_cv"
+}
+
 # 可移植哈希（变更检测用）：优先 shasum/sha1sum，回退 cksum。
 _hash() {
   if command -v shasum >/dev/null 2>&1; then shasum | awk '{print $1}'
@@ -170,6 +208,8 @@ verify_fingerprint() {
       | while IFS= read -r _f; do printf '== %s\n' "$_f"; cat "$_f" 2>/dev/null; done
     cat "$CMD_FILE" 2>/dev/null
     cat "$RCMD_FILE" 2>/dev/null                  # B3 燃料变更须使缓存失效（否则改 robustness-cmd 后 false-skip）
+    cat "$COV_FILE" 2>/dev/null                   # B4 燃料同理
+    cat "$COVMIN_FILE" 2>/dev/null                # 覆盖率地板变更亦须使缓存失效
     git rev-parse --show-toplevel 2>/dev/null    # 仓库绝对路径 + 机器身份：
     uname -srm 2>/dev/null                        # 令被提交/共享的 .last-green 在异机/异路径不误匹配
   } | _hash
@@ -197,9 +237,9 @@ if command -v git >/dev/null 2>&1 \
    && git rev-parse --verify HEAD >/dev/null 2>&1; then
 
   # A0. 门的"燃料"（verify-cmd / robustness-cmd）在未提交改动中被改 → 不可信，打回（仅 tracked 可查）。
-  if git diff HEAD -- "$CMD_FILE" "$RCMD_FILE" 2>/dev/null | grep -q .; then
+  if git diff HEAD -- "$CMD_FILE" "$RCMD_FILE" "$COV_FILE" "$COVMIN_FILE" 2>/dev/null | grep -q .; then
     {
-      printf '[Flow Oracle] 完整性门未通过：docs/flow/verify-cmd 或 robustness-cmd（门的燃料）在未提交改动中被修改，不可信。\n'
+      printf '[Flow Oracle] 完整性门未通过：docs/flow/verify-cmd / robustness-cmd / coverage-cmd / coverage-min（门的燃料）在未提交改动中被修改，不可信。\n'
       printf '若为正当更新验证命令，请先提交该文件再收尾（留审计痕迹）；否则恢复原命令。\n'
     } >&2
     exit 2
@@ -290,6 +330,46 @@ if [ -f "$RCMD_FILE" ]; then
       exit 2
     fi
     check_count_baseline "$ROUT" "$RCOUNT_FILE" "健壮性数基线门" || exit 2
+  fi
+fi
+
+# ---------- B4. 覆盖率门（严格 opt-in：docs/flow/coverage-cmd 存在且非空时生效）----------
+# 治"①同数语义掏空"的代理指标：掏空断言/删错误路径测试常使分支覆盖率下降——计数门(B2/B3)抓不到，
+# 覆盖率门能抓到。两道子检查：① coverage-cmd 退出码（含项目自带 --cov-fail-under 等阈值）；
+# ② 若设了 coverage-min，解析输出覆盖率%与之比，低于地板即打回（解析不出则仅凭退出码，诚实降级）。
+# 不存在 coverage-cmd → 跳过（零侵入）。注：变异测试不入本 Stop 门——每次收尾跑变异是分钟级、
+# 会逼用户关掉整个 Oracle；变异留在 implement verifier 的 mutation 抽查 + profile 的可选 mutation-cmd（按需/周期跑）。
+if [ -f "$COV_FILE" ]; then
+  CCMD=$(grep -v '^[[:space:]]*#' "$COV_FILE" | grep -v '^[[:space:]]*$' \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
+  if [ -n "$CCMD" ]; then
+    COUT=$(sh -c "$CCMD" 2>&1)
+    CCODE=$?
+    if [ "$CCODE" -ne 0 ]; then
+      {
+        printf '[Flow Oracle] 覆盖率门未通过（coverage-cmd 退出码 %s），不得声明完成。\n' "$CCODE"
+        printf '命令：%s\n' "$CCMD"
+        printf -- '--- 输出末 40 行 ---\n'
+        printf '%s\n' "$COUT" | tail -n 40
+        printf '补测试提升覆盖（尤其错误/分支路径），禁止下调阈值或改测试使其变绿（红线 §1/§2）。\n'
+      } >&2
+      exit 2
+    fi
+    if [ -f "$COVMIN_FILE" ]; then
+      # 地板必须是 0..100 的纯整数；非法（小数/科学计数/>100/带噪声）→ 视为未设地板，降级仅退出码（不误解析）。
+      MIN=$(grep -v '^[[:space:]]*#' "$COVMIN_FILE" | grep -v '^[[:space:]]*$' \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
+      case "$MIN" in ''|*[!0-9]*) MIN='' ;; esac
+      [ -n "$MIN" ] && { _plausible_count "$MIN" && [ "$MIN" -le 100 ] || MIN=''; }
+      CUR_COV=$(extract_coverage "$COUT")
+      if [ -n "$MIN" ] && [ -n "$CUR_COV" ] && [ "$CUR_COV" -lt "$MIN" ]; then
+        {
+          printf '[Flow Oracle] 覆盖率门未通过：覆盖率 %s%% 低于地板 %s%%，疑掏空断言/删分支测试。\n' "$CUR_COV" "$MIN"
+          printf '补足覆盖再收尾；若确需下调地板，提交 %s 并人审其变更（不在收尾时静默改低）。\n' "$COVMIN_FILE"
+        } >&2
+        exit 2
+      fi
+    fi
   fi
 fi
 
