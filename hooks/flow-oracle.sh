@@ -32,8 +32,9 @@
 #     ④ agent 直接覆写 hooks/flow-oracle.sh / verify-cmd / test-count 自身——
 #        脚本无法防自身字节被改；基线文件可被改低（故建议纳入版本控制、人审其变更）。
 #   B2 基线门特有的语义层边界（同样需覆盖率/变异 + 人审才能根治）：
-#     ⑤ 解析的是 runner 输出文本，agent 可影响：测试内 print("999 passed") 可向上伪造计数；
-#        reporter 不匹配任一正则时 B2 降级放行（unparseable=放行），改 reporter/吞摘要即绕过。
+#     ⑤ 解析的是 runner 输出文本，agent 可影响：测试内 print("999 passed") 可向上伪造计数。
+#        （已收紧）"建立过数值基线后又变不可解析"现按绕过处理→打回（check_count_baseline）；
+#        仍存的窗口：基线建立之前就吞摘要/不可解析，则首次即无基线可比（需覆盖率/变异根治）。
 #     ⑥ 首次建立的基线是 TOFU（trust-on-first-use，未经核验）：先弱化再首绿会把地板锁低位，
 #        "0 passed" 锁 0 即永久失效。故 docs/flow/test-count 应提交并人审，且依赖完整性门 A
 #        拦截已跟踪测试的掏空（B2 与 A 互补，非替代）。
@@ -83,7 +84,7 @@ override_active() {
   return 0
 }
 
-# 从 runner 输出解析"通过测试数"。命中即回，未识别回空（→ 降级放行，不误门控）。
+# 从 runner 输出解析"通过测试数"。命中即回，未识别回空（放行/打回由 check_count_baseline 据"有无基线"裁决）。
 # 多 suite/多 package 输出按同格式**求和**（非 tail）：顺序无关、消除并行交错抖动。
 # 只要解析确定性，绝对精度不重要：建立与比较用同一解析，地板自洽。
 extract_count() {
@@ -97,7 +98,7 @@ extract_count() {
   fi
   # 防 bignum 投毒：runner 输出里的 "99999999999999999999 passed" 会被求和成超 int64 的数，
   # 一旦写进基线，后续 `[ -lt ]` 比较出错被静默吞成 false → 测试数暴跌反被放行。
-  # 源头截断：>18 位（必超真实测试规模、且超 int64 安全域）一律视为无法解析（→ 降级放行，不污染基线）。
+  # 源头截断：>18 位（必超真实测试规模、且超 int64 安全域）一律视为无法解析（不污染基线；后续放行/打回同样由 check_count_baseline 据有无基线裁决）。
   _plausible_count "$_n" || _n=''
   printf '%s' "$_n"
 }
@@ -114,7 +115,18 @@ _plausible_count() {
 check_count_baseline() {
   _out=$1; _cf=$2; _label=$3
   _cur=$(extract_count "$_out")
-  [ -n "$_cur" ] || return 0                       # 解析不出 → 降级放行（不误门控）
+  if [ -z "$_cur" ]; then
+    # 解析不出通过数。无基线 → 降级放行（establish 前无可比，不误门控）。
+    # 但"已建立过数值基线却本轮解析不出"= 异常：换 reporter / 吞测试摘要以绕过计数门（威胁⑤）。
+    # → 打回（已提交豁免可接受正当的 reporter/命令更换）。收紧"unparseable 一律放行"的盲点。
+    if [ -f "$_cf" ] && [ -n "$(grep -oE '[0-9]+' "$_cf" 2>/dev/null | head -n1)" ]; then
+      override_active && return 0
+      printf '[Flow Oracle] %s未通过：已建立通过数基线，但本轮输出解析不出通过数，疑换 reporter/吞测试摘要以绕过计数门。\n' "$_label" >&2
+      printf '若确为正当更换验证命令/reporter，更新或删除基线 %s 后重建，或提交 %s 接受变更（留审计痕迹）。\n' "$_cf" "$ALLOW_FILE" >&2
+      return 2
+    fi
+    return 0
+  fi
   if [ -f "$_cf" ]; then
     _base=$(grep -oE '[0-9]+' "$_cf" | head -n1)
     [ -n "$_base" ] || return 0                     # 基线无数字（垃圾文件）→ 跳过比较（保守）

@@ -186,9 +186,11 @@ run "jest format below baseline → block" 2 "$NOSTOP"
 newdir cB6; setcmd "printf -- '--- PASS: TestA (0.00s)\n--- PASS: TestB (0.00s)\n'"; printf '3\n' > docs/flow/test-count
 run "go -v PASS count below baseline → block" 2 "$NOSTOP"
 
-# 无法识别的输出 + 有基线 → 降级放行（不误门控）
+# 无法识别的输出 + 有数值基线 → 打回（威胁⑤加固：建立过基线却变不可解析 = 疑换 reporter/吞摘要绕过）。
+# 注：行为相对旧版"degrade-open 放行"刻意收紧；正当 reporter 更换走已提交豁免（见 cU2）。
+# "无基线 + 不可解析"仍降级放行不误门控（见 cU3）。
 newdir cB7; setcmd "printf 'everything looks fine\n'"; printf '3\n' > docs/flow/test-count
-run "unparseable output → degrade-open pass" 0 "$NOSTOP"
+run "unparseable output + existing baseline → block (威胁⑤收紧)" 2 "$NOSTOP"
 
 # 跌破 + 已提交豁免 → 放行并刷新基线为新值
 newdir cB8; gitinit
@@ -332,6 +334,22 @@ printf 'echo "1 passed"; true\n' > docs/flow/robustness-cmd
 git add -A; git commit -qm base
 printf 'true\n' > docs/flow/robustness-cmd                         # 篡改燃料，未提交
 run "B3 fuel (robustness-cmd) tampered uncommitted → A0 block" 2 "$NOSTOP"
+
+# ---- 加固：已建立基线后输出变不可解析（换 reporter/吞摘要绕过计数门，威胁⑤）→ 打回 ----
+newdir cU1; setcmd 'echo "10 passed"; true'
+run "establish numeric baseline → pass" 0 "$NOSTOP"
+setcmd 'echo no-count-here; true'                                  # 仍 exit0，但不再吐通过数
+run "baseline exists but output now unparseable → block" 2 "$NOSTOP"
+
+# 已提交豁免（非 git 下"存在即生效"）→ 接受正当 reporter 更换
+newdir cU2; setcmd 'echo "10 passed"; true'
+run "establish baseline (non-git) → pass" 0 "$NOSTOP"
+setcmd 'echo no-count; true'; touch docs/flow/verify-allow-test-changes
+run "unparseable + override → pass" 0 "$NOSTOP"
+
+# 不误伤：从未建立基线时输出不可解析仍放行（establish 前无可比）
+newdir cU3; setcmd 'true'                                          # 无通过数、无基线
+run "no baseline + unparseable → pass (no false-block)" 0 "$NOSTOP"
 
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
