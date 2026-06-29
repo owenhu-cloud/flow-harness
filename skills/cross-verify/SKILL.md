@@ -26,6 +26,17 @@ description: 高风险/高不可逆 change 想用「不同模型/外部 agent」
 
 cross-verify 不替 `verify` 跑命令，也不替 `implement`/`code-review` 定义检查内容——只换大脑。
 
+## 两种审查对象：change-review（默认）/ plan-review
+
+同一套"换异模型大脑"的机制，作用在两类对象上——其余铁律/派发闭环/降级完全共用：
+
+| 模式 | 触发 | 喂什么 | 对抗指令聚焦 | 回传产物 |
+|---|---|---|---|---|
+| **change-review**（默认） | implement/code-review 之上，验已成的 change | change 描述 + 真实 diff/范围 + 期望行为 | 正确性/边界/并发/错误路径、可读性/设计 | Critical/Major 发现 + 文件:行 + 复现 |
+| **plan-review** | `plan` 收尾人类 gate 前（R3 / 命中档位地板默认；R2 建议） | `design.md` + `tasks.md`（Decisions / Robustness-Cases / 切口决策） | **设计层盲点**：漏掉的失败模式、更优替代、切口缝是否合理（SRP/DIP）、风险有无回滚 | `Cross-Review` 小节：adapter+healthcheck 结果 · 模型数(是否降级) · 每条发现 · 采纳/技术性反驳 · 改到 design/tasks 哪一处 |
+
+plan-review 审的是**方案**不是 diff——目的是把设计缺陷挡在写代码之前（返工便宜一个量级）。`design.md` 没有 diff，故派发时把方案全文当"被审对象"喂入，指令异模型挑设计层问题，不要它读代码。其余（多轮闭环、诚实摄取、降级显式告知）与 change-review 一致。
+
 ## 铁律（iron-laws，不可违反）
 
 1. **异模型才算 cross。** verifier 必须是与 builder **不同的模型 / 外部 agent**，经 MCP 工具或外部 CLI 派发（适配器见 `references/adapters.md`）。同模型换个子代理 = 普通 `implement` verifier，**不得冒称跨模型**。
