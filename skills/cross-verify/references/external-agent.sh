@@ -3,7 +3,7 @@
 #
 # 设计定位（遵 DESIGN「除三支 hook 外不引入常驻进程或命令行工具」）：
 #   本脚本是一次性 references 脚本（仿 verify-citations.sh 先例），由 cross-verify / plan /
-#   cross-execute 等技能按需调用——非常驻进程、非 hook、无注册。POSIX sh、无 jq。
+#   brainstorm 等技能按需调用——非常驻进程、非 hook、无注册。POSIX sh、无 jq。
 #   codex 可执行名经 CODEX_BIN 注入（默认 codex），便于测试 stub 与不可用降级。
 #
 # 用法:
