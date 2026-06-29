@@ -85,6 +85,7 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 ### 2. 权责分离
 - **builder ≠ verifier**：实现的子代理不得改测试 / 断言 / CI 配置来让自己通过。
 - 验证由独立视角给出——派一个对抗性 verifier 子代理，默认怀疑。
+- **异模型可用时，verifier 应为不同模型**（盲点不重叠）：项目配了 `cross-verify` 适配器即做到 builder 模型 ≠ verifier 模型，并在喂裁决前抹除 implementer framing；多 change 间轮换谁建谁验。
 - 涉及测试 / CI / 权限 / 发布的变更 → 停下说明，不静默执行。
 
 ### 3. 对抗
