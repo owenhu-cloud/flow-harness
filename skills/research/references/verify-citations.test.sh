@@ -71,5 +71,45 @@ cat > "$TMP/doi.md" <<'EOF'
 EOF
 run "doi counted & checked (dead doi) → block" 2 "$TMP/doi.md" "不可达"
 
+# 8. REQUIRE_SUPPORT：每源带支撑摘录 → pass
+cat > "$TMP/sup_ok.md" <<'EOF'
+## supported claim
+- t1 | https://ex.com/a | the paper states X increases Y by 12%
+- t2 | https://ex.com/b | benchmark shows the same effect across models
+- t3 | doi:10.1/c | meta-analysis confirms the direction holds
+EOF
+export REQUIRE_SUPPORT=1
+run "REQUIRE_SUPPORT + excerpts → pass" 0 "$TMP/sup_ok.md"
+
+# 9. REQUIRE_SUPPORT：缺摘录（仅 URL）→ block
+cat > "$TMP/sup_missing.md" <<'EOF'
+## unsupported claim
+- t1 | https://ex.com/a
+- t2 | https://ex.com/b
+- t3 | doi:10.1/c
+EOF
+run "REQUIRE_SUPPORT + no excerpt → block" 2 "$TMP/sup_missing.md" "缺支撑摘录"
+
+# 10. REQUIRE_SUPPORT：摘录过短 → block
+cat > "$TMP/sup_short.md" <<'EOF'
+## short-excerpt claim
+- t1 | https://ex.com/a | ok
+- t2 | https://ex.com/b | ok
+- t3 | doi:10.1/c | ok
+EOF
+run "REQUIRE_SUPPORT + short excerpt → block" 2 "$TMP/sup_short.md" "缺支撑摘录"
+# 10b. REQUIRE_SUPPORT：摘录内部含 `|` → 取第二个 `|` 之后全部 → 合法长摘录 pass（Codex 证伪边界）
+cat > "$TMP/sup_pipe.md" <<'EOF'
+## pipe-in-excerpt claim
+- t1 | https://ex.com/a | supporting sentence with a | pipe inside it
+- t2 | https://ex.com/b | another sufficiently long supporting excerpt
+- t3 | doi:10.1/c | third sufficiently long supporting excerpt
+EOF
+run "REQUIRE_SUPPORT + excerpt containing pipe → pass" 0 "$TMP/sup_pipe.md"
+unset REQUIRE_SUPPORT
+
+# 11. 默认模式（无 REQUIRE_SUPPORT）：缺摘录仍 pass（向后兼容，证明既有契约不破）
+run "default mode ignores missing excerpt → pass" 0 "$TMP/sup_missing.md"
+
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

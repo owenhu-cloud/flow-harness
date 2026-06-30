@@ -36,13 +36,14 @@
 
 ## 机器校验（sources.md 格式 + 校验脚本）
 
-`sources.md` 用可被脚本解析的格式（`## ` 起一条断言块，每个 `- ` 行含一个 URL/doi 即计一个源）：
+`sources.md` 用可被脚本解析的格式（`## ` 起一条断言块，每个 `- ` 行含一个 URL/doi 即计一个源）。
+**每行带一段支撑摘录**（`| <URL> | <摘录>`）——摘录是「该源确实支撑此断言」的证据（claim ledger 思想：登记的不是 URL 而是「断言→源→支撑摘录」），把校验从「可达」抬向「被支撑」（CoVe 式）：
 
 ```
 ## <断言文本>
-- <源类型> | https://...
-- <源类型> | doi:10.xxxx/...
-- <源类型> | https://...
+- <源类型> | https://... | 该页/论文里支撑本断言的关键句或数据（≥12 字）
+- <源类型> | doi:10.xxxx/... | 支撑摘录
+- <源类型> | https://... | 支撑摘录
 ```
 
 落盘后跑校验器（gate-able，纯 POSIX sh，非 0 即不达标）。脚本随本技能分发，路径 = **技能加载时显示的 "Base directory" + `/references/verify-citations.sh`**（cwd 是用户项目根，别用相对路径找它）；`sources.md` 路径相对用户项目根：
@@ -51,7 +52,7 @@
 sh "<本技能 base directory>/references/verify-citations.sh" docs/flow/<change>/sources.md
 ```
 
-它校验：① 每条断言独立源数 ≥ 阈值（默认 3，`MIN_SOURCES=` 可调）；② 每个 URL/DOI 真实可达（curl HEAD，2xx/3xx）。源数不足或引用不可达即 `exit 2` 列出问题——**补足独立源或剔除不可达引用，禁编造引用充数**。离线/测试可用 `FLOW_URL_CHECK` 注入自定义可达性检查器（见 `verify-citations.test.sh`）。
+它校验：① 每条断言独立源数 ≥ 阈值（默认 3，`MIN_SOURCES=` 可调）；② 每个 URL/DOI 真实可达（curl HEAD，2xx/3xx）；③ **`REQUIRE_SUPPORT=1` 时**每源须带支撑摘录（≥`MIN_EXCERPT`，默认 12 字），缺则 `exit 2`。源数不足/引用不可达/缺摘录即列出问题——**补足独立源、剔除不可达引用、为每源补支撑摘录，禁编造引用充数**。离线/测试可用 `FLOW_URL_CHECK` 注入可达性检查器（见 `verify-citations.test.sh`）。**高风险/不可逆决策的深档建议开 `REQUIRE_SUPPORT=1`**——把「URL 可达」抬到「源确实支撑断言」（机器只验摘录存在与长度；摘录是否真出现在该页由独立 verifier/异模型判断，别只靠可达性自满）。
 
 ## 收尾硬门（HARD GATE：深档不跑校验器、不绿，不算完成）
 

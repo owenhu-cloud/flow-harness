@@ -3,11 +3,26 @@ name: flow
 description: 在动手任何工程任务前先用——判断任务复杂度档位（R0–R3），按档位决定该走多重的流程，并加载对应的 Flow 技能。涉及写代码、改配置、重构、调试、设计、修 bug、做功能时都适用。 · EN: use before ANY engineering task — judge the complexity tier (R0–R3) and route to the right process depth; applies to writing code / changing config / refactoring / debugging / design / bugfixing / building a feature.
 ---
 
-# Flow — 按复杂度路由的工程工作流
+# Flow — 按复杂度路由的工程工作流（路由器）
 
-Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `Task` 派子代理、用 `TodoWrite` 列清单、用 plan mode 设门。核心纪律：先判档、按档走流程、完成必带证据。
+Flow 是一组原生 Claude Code 技能。用 `Skill` 加载技能、`Task` 派子代理、`TodoWrite` 列清单、plan mode 设门。核心纪律：**先判档、按档走流程、完成必带证据**。
 
-## 第一步永远是判档
+**本文件是极短路由器**：判档 → 选流程 → 加载技能。完整技能地图、质量红线全文、升维阶梯、Oracle 细节都在 `references/`，**按需加载，别一次性吞**。
+
+## 第零步：意图契约（所有档位，动手改文件前）
+
+判档之前先做一件最便宜的事——**用四行复述你对任务的理解**，把误解暴露在动手之前（这是治"指令理解"的针对性结构，不是仪式）：
+
+```
+Intent: <一句话，这次到底要达成什么>
+Constraints: <硬约束：性能/兼容/接口/期限，或 none>
+Non-goals: <这次明确不做什么>
+Verify-signal: <可观测的完成信号：一条命令 / 测试 selector / 可见行为>
+```
+
+R0 可脑内确认 + 一句话声明；R1+ 让用户可见。**有阻塞性歧义先问一个具体问题再动手**，别替用户默默选。Stop Oracle 的「意图契约门」会在「本会话改了文件却全程无 agent 正文产出过 `Intent:` 锚」时打回（机器为**行级近似**：只认 assistant text 块里的 `Intent:`，混行 text+tool_use 且 Intent 仅在 payload 时会漏放，四行完整性靠纪律；仅 `verify-cmd` 在场的项目；`docs/flow/intent-gate-off` 可关）。
+
+## 第一步：判档
 
 收到工程任务，先用四维 rubric 判一次档（**每个任务判一次**，同一任务后续消息沿用，别反复横跳）：
 
@@ -33,7 +48,7 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 
 ### 档位地板（敏感面不得自评压低）
 
-判档是自评，但触及高危面时**档位有地板，不得为省流程把分打低**：
+判档是自评，但触及高危面时**档位有地板，不得为省流程把分打低**（压低跳门 = 与删测试变绿同性质）：
 
 | 命中面 | 地板 |
 |---|---|
@@ -42,84 +57,25 @@ Flow 是一组原生 Claude Code 技能。用 `Skill` 工具加载技能、用 `
 | CI / 发布 / 部署 / 生产数据 | ≥ **R2** |
 | 支付 / 计费 / 资金 | ≥ **R2** |
 
-`flow-reinject` hook 会在你的消息命中这些关键词时贴出地板提示。压低档位以跳门 = 违反纪律，与删测试变绿同性质。
+`flow-reinject` hook 会在消息命中这些关键词时贴出地板提示。
 
-## 技能地图（按需用 Skill 工具加载，别一次性全读）
+## 选流程后加载技能
 
-| 技能 | 何时 | 档位 |
-|---|---|---|
-| `profile` | 首次进入某代码库（无 `docs/flow/project.md`），固化项目画像 | R1 R2 R3 |
-| `research` | 任务新颖/不确定，需外部调研再决定（高风险升深档） | R2 R3 |
-| `brainstorm` | 方向未定，先对齐再动手（**硬门**） | R2 R3 |
-| `plan` | 方向已定，落成可执行设计 + 任务拆解（**门**） | R2 R3 |
-| `implement` | 写代码：builder 做 + verifier 对抗，角色分离 | R1 R2 R3 |
-| `verify` | 声明完成前，按档位跑真实验证命令、贴新鲜输出 | R0 R1 R2 R3 |
-| `flow-doctor` | 想知道「这个项目里 Flow 什么在真生效、什么只是纪律」时体检 Oracle/B3/B4/cross 接入态与外部 agent 健康 | R0 R1 R2 R3 |
-| `diagram` | 交付需要架构/流程/状态/数据图 | R2 R3 |
-| `document` | 给人看的交付物（结论+取舍+图，非流水账） | R1 R2 R3 |
-| `harvest` | 撞上学习信号（连败/移交/返工/真 bug）时沉淀经验 | R1 R2 R3 |
-| `systematic-debugging` | 调试/修 bug 卡住，四阶段根因调试（无根因不提修复） | R1 R2 R3 |
-| `code-review` | implement 后、交付前，派独立 reviewer 子代理评审并处理反馈 | R2 R3 |
-| `cross-verify` | 高风险/高不可逆 change，把独立 verifier/reviewer 升级为**不同模型/外部 agent**（MCP/CLI，如 Codex）对抗证伪 | R2 R3 |
-| `cross-execute` | 一串明确、可独立验证的子任务，派**异模型（Codex）在隔离 worktree** 执行、Claude 审 diff（默认关闭，`docs/flow/cross-execute` 在场才启用） | R3 |
-| `subagent-driven-development` | 一串任务逐个派 fresh 子代理 + 双评审（多任务编排外壳） | R2 R3 |
-| `finishing-a-development-branch` | change 收尾：合并 / PR / 丢弃决策，先过 verify+Oracle | R1 R2 R3 |
-| `codebase-analysis` | 陌生/大库先理解内部结构：只读子代理 fan-out → `docs/flow/codemap.md`（架构图+模块+入口+查找表） | R2 R3 |
-| `impact-analysis` | 改前算变更波及面：依赖图+时序耦合 → 受影响文件/测试范围，喂 plan/verify | R2 R3 |
-| `tech-debt-audit` | 评健康度/定技术债热点：git churn×complexity，每条发现强制 `file:line` | R2 R3 |
-| `writing-skills` | 要新增/修改一支 Flow 技能 | — |
+核心路径技能（按需用 `Skill` 加载，**别一次性全读**）：`profile`(首入库画像) · `research`(新颖/不确定·高风险升深档) · `brainstorm`(方向未定·硬门) · `plan`(设计+任务拆解·门) · `implement`(builder+verifier 对抗) · `verify`(完成前·真实命令+新鲜输出) · `document`(人看的交付物) · `systematic-debugging`(调试卡住·四阶段) · `code-review`(交付前独立评审) · `cross-verify`(高风险·异模型证伪) · `harvest`(撞学习信号沉淀)。
 
-技能之间靠正文里的「下一步去 X 技能」显式交接。每支技能只在被加载时进主上下文，主线程保持干净。
+**完整技能地图**（含分析类 `codebase-analysis`/`impact-analysis`/`tech-debt-audit`、收尾 `finishing-a-development-branch`、`diagram`、`flow-doctor`、元 `writing-skills`、及「已折叠」说明）→ `references/skill-map.md`。
 
-**按需技能（不改判档，卡到/到点才插入）**：调试卡住 → `systematic-debugging`；交付前要独立评审 → `code-review`（与 implement 的对抗 verifier 互补）；高风险面想用异模型增强独立性 → `cross-verify`（把 verifier/reviewer 的执行者换成不同模型/外部 agent）；R2/R3 一串任务要逐个隔离派发 → `subagent-driven-development`（R3 且想把执行交给**异模型在隔离 worktree** 跑、Claude 退到审 diff 位 → `cross-execute`，默认关闭、opt-in）；change 收尾合并/PR/丢弃 → `finishing-a-development-branch`。
+技能间靠正文「下一步去 X 技能」显式交接；每支只在加载时进上下文，主线程保持干净。
 
-**分析类（理解优先于动手，多在 plan 前）**：陌生/大库先 `codebase-analysis` 画内部结构图；改前用 `impact-analysis` 算波及面定测试范围；要系统性盘技术债用 `tech-debt-audit`。三者只读、只产结构化制品，不测命令（那是 `profile`）、不查外网（那是 `research`）。
+## 质量红线（所有技能共享，不靠自律靠纪律 · 全文见 `references/redlines.md`）
 
-**已折叠（不另设技能，避免重叠）**：规格澄清 / spec-clarify → `brainstorm` 的苏格拉底澄清；架构 / 设计评估 → `plan` 的 Decisions/Risks-Tradeoffs + `document`；安全审查 → Claude Code 原生 `/security-review` 命令；深度调研 → `research` 的「深档」。
+1. **诚实/反 reward-hacking**：禁删/弱化测试或改断言「变绿」；**完成必带同轮新鲜 build/test 输出**；未验证的结论标「未验证」，禁编造。
+2. **权责分离**：**builder ≠ verifier**（实现者不得改测试/断言/CI）；异模型可用时 verifier 用不同模型；动测试/CI/权限/发布停下说明。
+3. **对抗**：「实现完成」≠「通过」，必被独立 verifier 证伪（专攻边界/并发/错误路径/隐藏假设）。
+4. **主动穷尽**：R0/R1 先做后问、R2/R3 门处先问后做；修一处缺陷顺查同文件/同模块同类。
+5. **产物纪律**：交付物只含结论+取舍+图；**执行流水账不当文档交付**。
 
-## 质量红线（所有技能共享，不靠自律靠纪律）
+## 卡住升维 · 机器门控
 
-### 1. 诚实 · 反 reward-hacking
-- 禁止删/弱化测试、改断言来「变绿」。挂了就是没过，改实现不改测试。
-- 不确定显式标注，未验证的结论标「未验证」，禁编造。
-- **完成必带证据**：任何「完成/通过」声明，须在同一轮附**新鲜的** build/test 工具输出。说「应该没问题」不算完成。
-
-### 2. 权责分离
-- **builder ≠ verifier**：实现的子代理不得改测试 / 断言 / CI 配置来让自己通过。
-- 验证由独立视角给出——派一个对抗性 verifier 子代理，默认怀疑。
-- **异模型可用时，verifier 应为不同模型**（盲点不重叠）：项目配了 `cross-verify` 适配器即做到 builder 模型 ≠ verifier 模型，并在喂裁决前抹除 implementer framing；多 change 间轮换谁建谁验。
-- 涉及测试 / CI / 权限 / 发布的变更 → 停下说明，不静默执行。
-
-### 3. 对抗
-- 「实现完成」≠「通过」。任何实现都要被独立 verifier 证伪。
-- verifier 专攻边界、并发、错误路径、隐藏假设；对照 `implement/references/antipatterns.md` 扫反模式。
-
-### 4. 主动与穷尽
-- R0/R1 先做后问；R2/R3 在门处先问后做。
-- 修一个 bug → 顺手查同文件/同模块的同类 bug，别只补眼前这一处。
-
-### 5. 产物纪律
-- 给人的交付物（`docs/`、PR、CHANGELOG）只含结论、取舍、图。
-- **禁止把执行流水账当文档交付**——「我先…然后…接着…」是过程，不是产物。
-
-## 卡住时升维（同一问题连续失败才触发，不在第一次）
-
-> 调试卡住优先**用 `Skill` 工具加载 `systematic-debugging`** 做四阶段根因调试（无根因不提修复）；下表是其压缩版升维阶梯，供主线程快速参照。
-
-| 连败次数 | 动作 |
-|---|---|
-| 1 | 仔细重读上一次的错误输出。 |
-| 2 | 换眼：换一个**根本不同**的分析视角，别在同一思路上调参。 |
-| 3 | 升维：搜完整错误 + 读相关源码，列 **3 个根本不同的假设**逐一验证。 |
-| 4 | 归零：抛弃已有假设，构造**最小复现**，重列 3 个新假设。 |
-| 5+ | 移交：做隔离 PoC / 换技术栈；仍卡 → 质疑需求本身，结构化移交人类。 |
-
-同一批文件被连续多轮修改却不收敛 → 强制回到根因，提一个 180° 反向假设。
-
-## 机器级硬门控（独立 Oracle，已内置）
-
-完成不靠 agent 自说自话：Flow 自带 `Stop` hook Oracle（`hooks/flow-oracle.sh`）。**其生效是有条件的**——仅当项目里存在 `docs/flow/verify-cmd`（由 `profile`/`verify` 写入）时，agent 每次试图收尾该 hook 才以**独立进程**跑这条命令裁决，非 0 退出即打回、阻止收尾，agent 在该轮收尾内绕不过。**未写 `verify-cmd` 则 Oracle 整体放行（零侵入），此时无任何机器门，完成判定退回纪律级（红线 + verify 技能）。** 装了插件 ≠ Oracle 在守——拿不准就用 `flow-doctor` 体检实际接入态。
-
-它防的是「压力下偷懒/reward-hacking」，提高绕过成本、留审计痕迹，**不是安全边界**：能 commit 改基线/燃料者仍可绕（信任根在仓库内，根治需带外 CI/人审基线，见 `docs/DESIGN.md` 威胁模型）。
-
-接入方式：首次进入项目用 `profile` 探测并写 `docs/flow/verify-cmd`。需要更强的外部循环时仍可叠加 `/pua:pua-loop` 等，与本 Oracle 正交。
+- **升维**：同一问题**连续失败才**升维（不在第一次）→ 优先 `Skill` 加载 `systematic-debugging` 四阶段根因调试；速查阶梯 → `references/escalation.md`。
+- **机器门控**：完成由 `Stop` hook 独立 Oracle 裁决，但**仅当 `docs/flow/verify-cmd` 在场**才生效（非 0 退出即打回、阻止收尾）；未写则 Oracle 放行、退回纪律级。装了插件 ≠ Oracle 在守，拿不准用 `flow-doctor` 体检。完整说明（含威胁模型边界）→ `references/oracle.md`。

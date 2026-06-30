@@ -521,5 +521,55 @@ git add -A; git commit -qm base
 printf '1\n' > docs/flow/coverage-min                            # 偷偷把地板改到 1，未提交
 run "B4 coverage-min lowered uncommitted → A0 block" 2 "$NOSTOP"
 
+# ---- A1. 意图契约门（治"指令理解"；会话级、fail-open）----
+# 改了文件却全程无 agent 产出意图契约 → 打回
+newdir cIntent1; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"text","text":"done editing"}]}}' > tx.jsonl
+run "edits + no intent → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# 改了文件且 assistant 产出过意图契约 → 放行
+newdir cIntent2; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: add feature X"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + assistant intent → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# 关键反空转：Intent 只出现在 hook 注入行（非 assistant）→ 不算数 → 仍打回（堵门被自身模板满足）
+newdir cIntent3; setcmd 'true'
+printf '%s\n' '{"type":"hook_additional_context","content":"Intent: 模板来自 reinject 注入"}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit"}]}}' > tx.jsonl
+run "intent only in hook line (not assistant) + edits → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# 关键反空转2（Codex 证伪）：Intent 只出现在 Write 工具 payload(文件内容)里、非 agent 正文 → 仍打回
+newdir cIntent8; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"content":"Intent: 这是文件正文不是契约"}}]}}' > tx.jsonl
+run "intent only in tool payload (not assistant text) + edits → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# 既定边界（诚实记录·Codex 二轮）：单条 assistant 行同时含 text 块(无 Intent) + tool_use payload(含 Intent)
+#   → 行级 grep 漏放(pass)。属「宁漏放不误杀」+ 非安全边界取舍；真实 transcript text/tool_use 不同行(已验证)，
+#   此对抗形态不出现。若此例哪天该收紧，改 A1 为块级解析并把期望改为 2。
+newdir cIntent9; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"editing now"},{"type":"tool_use","name":"Write","input":{"content":"Intent: 文件正文"}}]}}' > tx.jsonl
+run "mixed text+tooluse line, intent only in payload → fail-open pass (documented漏放)" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# 本会话未用编辑工具（纯问答）→ 放行（不误伤非工程轮）
+newdir cIntent4; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"just answering"}]}}' > tx.jsonl
+run "no edit tools → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# opt-out 文件在场 → 关闭本门 → 放行
+newdir cIntent5; setcmd 'true'; : > docs/flow/intent-gate-off
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "intent-gate-off opt-out → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# transcript_path 指向不存在文件 → fail-open 放行
+newdir cIntent6; setcmd 'true'
+run "missing transcript → fail-open pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/nope.jsonl"}'
+
+# 无 transcript_path（旧式输入）→ fail-open 放行（保证既有用例不受影响）
+newdir cIntent7; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "no transcript_path field → fail-open pass" 0 "$NOSTOP"
+
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
