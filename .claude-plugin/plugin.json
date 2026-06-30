@@ -1,7 +1,7 @@
 {
   "name": "flow",
-  "version": "1.3.0",
-  "description": "Flow — 按复杂度路由的工程工作流，纯原生 Claude Code 技能实现。一支 SessionStart hook + 一组按需加载的技能：动手前判 R0–R3 档位、按档位走 brainstorm→plan→门→implement→verify→document，完成必带证据。可选多模型对抗（cross-verify 异模型证伪 / cross-execute 异模型在隔离 worktree 执行，均 opt-in 默认关闭，经 references 脚本派发）。无常驻 CLI、无后台进程、无状态文件。",
+  "version": "1.4.0",
+  "description": "Flow — 按复杂度路由的工程工作流，纯原生 Claude Code 技能实现。三支 hook（SessionStart 注入路由 + UserPromptSubmit 重注入 + Stop 独立 Oracle）+ 一组按需加载的技能：动手前判 R0–R3 档位、按档位走 brainstorm→plan→门→implement→verify→document，完成必带证据。Stop hook 独立 Oracle 跑五道机器门裁决完成（完整性/验证命令/测试数基线/健壮性/覆盖率，后两道 opt-in），堵 happy-path 全绿即完成、异常即崩；plan 按复杂度+SOLID 拆任务。可选多模型对抗（cross-verify 异模型证伪 change 或 plan-review / cross-execute 异模型隔离 worktree 执行，均 opt-in 默认关闭）。无常驻 CLI、无后台进程、无状态文件。",
   "author": {
     "name": "owenhu",
     "url": "https://github.com/owenhu-cloud"
