@@ -17,12 +17,19 @@
 #       它能抓"删分支/删错误路径测试使覆盖率跌破地板"（计数门抓不到）；但：地板设太低则跌而未破不拦（见⑬），
 #       且抓不到"同路径假断言"（expect(x).toBe(y)→expect(true).toBe(true) 路径不变、覆盖率不降）——那需变异，见⑩。
 #       变异测试刻意不入本门（每次收尾跑变异分钟级、会逼用户关掉整个 Oracle）；见威胁模型⑩。
-# 降本（严格 opt-in）：存在 docs/flow/verify-cache 时，状态指纹与上次绿相同即跳过全部门。
+# 降本（严格 opt-in）：存在 docs/flow/verify-cache 时，状态指纹与上次绿相同即跳过【昂贵的 verify-cmd
+#   执行】（B/B2/B3/B4）。**A 完整性门 + A0c 基线门 always 跑、不被缓存跳过**（命中早退在 A 之后）。
 #   默认关闭 → 行为不变；仅 git、指纹保守、非 git/失败即回退到"跑"。已知 false-skip 边界：
 #     ① 指纹用 --exclude-standard：.gitignore 的测试依赖（.env/fixtures/本地 DB）改动不触发
 #        失效——测试依赖被忽略文件时勿开 verify-cache（纳入全部 ignored 文件会拖垮指纹）。
 #     ② .last-green 掺入机器/仓库路径身份，**勿提交共享**；跨机/CI 各自重建。
-#     ③ 开 verify-cache = 把门可靠性下放给指纹完备性：指纹任一盲点会同时穿透 A/B/B2 三门。
+#     ③ 开 verify-cache = 把【B 段】可靠性下放给指纹完备性 + .last-green 可信。.last-green 是 agent 可
+#        直接写的普通文件：能算出篡改态指纹者可【伪造】一份匹配的 .last-green（无需 commit）→ 跳过 B/B2。
+#        缓解：A/A0c 已移到命中早退【之前】always 跑，故"删/弱化测试、改低/删/改垃圾基线文件"即便伪造
+#        缓存仍被 A/A0c 拦（见测试 cCF）；但【runner 输出的通过数下降】（如 verify-cmd 委托的 run.sh
+#        少跑一半，基线文件未动）属 B2 职责，B2 在命中时本就不跑（缓存即"跳过执行"，无输出可验）——这是
+#        缓存的固有取舍，非可在仓库内根治（要么重跑 verify-cmd defeat 缓存，要么需不可伪造的密钥=仓库内不存在）。
+#        故 verify-cache 是【降本优化、非安全边界】：仅在"接受 B 段 forge 风险"处开；高保真场景关掉它，每轮全验。
 #     ④ 含换行的未跟踪文件名（病态）可能漏入指纹——极罕见，已知边界。
 #
 # 威胁模型与边界（诚实声明，勿夸大）：
@@ -105,6 +112,41 @@ override_active() {
   return 0
 }
 
+# C-1：已提交基线（test-count/robustness-count）被绕过计数门。两条绕过都堵（除非已提交豁免）：
+#   (a) 工作树把值【改低】；(b) 工作树【删除】已提交基线（含 `git rm`）——否则 check_count_baseline
+#       见文件不存在会按"首绿"重新 establish 一个更低基线，等于清零地板（Codex 证伪发现的 C-1 漏洞）。
+# 以 HEAD 为信任锚（`git cat-file -e HEAD:$_bf`）：HEAD 无基线＝establish 场景，放行（不干扰首次建立）；
+# HEAD 有基线则工作树要么删了要么改低 → 均按绕过打回。持平/调高放行。基线文件由 hook 自动写，
+# 故不并入"任何改动即打回"的 fuel 门，只在此拦"删/改低"。路径相对仓库根（hook cwd=项目根，全脚本一致）。
+# 注：信任根仍在仓库内——能 commit 改它者仍可绕（带外 CI/人审基线才是边界，见文件头威胁④/⑥与 DESIGN）。
+check_baseline_not_lowered() {  # <baseline-file>
+  _bf=$1
+  git cat-file -e "HEAD:$_bf" 2>/dev/null || return 0              # HEAD 无已提交基线 → establish 场景 → 不管
+  _head=$(git show "HEAD:$_bf" 2>/dev/null | grep -oE '[0-9]+' | head -n1)
+  [ -n "$_head" ] || return 0
+  _plausible_count "$_head" || return 0
+  if [ ! -f "$_bf" ]; then                                         # (b) 已提交基线被删（rm / git rm）
+    override_active && return 0
+    printf '[Flow Oracle] 完整性门未通过：已提交基线 %s 被删除（HEAD=%s），疑清零地板以重建低基线绕过计数门。\n' "$_bf" "$_head" >&2
+    printf '恢复该文件，或提交 %s 接受正当移除（留审计痕迹）。\n' "$ALLOW_FILE" >&2
+    return 2
+  fi
+  _work=$(grep -oE '[0-9]+' "$_bf" 2>/dev/null | head -n1)
+  if [ -z "$_work" ] || ! _plausible_count "$_work"; then         # (c) 改成无数字/非法（>18位）值 → 令计数门失效
+    override_active && return 0                                    #     （HEAD 本有有效基线，B2 遇不可解析基线会放行 → 等价清零地板）
+    printf '[Flow Oracle] 完整性门未通过：已提交基线 %s 被改成不可解析/非法值（HEAD=%s），疑令计数门失效以绕过。\n' "$_bf" "$_head" >&2
+    printf '恢复为正常数值，或提交 %s 接受变更（留审计痕迹）。\n' "$ALLOW_FILE" >&2
+    return 2
+  fi
+  if [ "$_work" -lt "$_head" ]; then                              # (a) 改低
+    override_active && return 0
+    printf '[Flow Oracle] 完整性门未通过：基线 %s 被未提交改低（HEAD=%s → 工作树=%s），疑绕过计数门。\n' "$_bf" "$_head" "$_work" >&2
+    printf '恢复基线值，或提交 %s 接受正当下降（留审计痕迹）。\n' "$ALLOW_FILE" >&2
+    return 2
+  fi
+  return 0
+}
+
 # 从 runner 输出解析"通过测试数"。命中即回，未识别回空（放行/打回由 check_count_baseline 据"有无基线"裁决）。
 # 多 suite/多 package 输出按同格式**求和**（非 tail）：顺序无关、消除并行交错抖动。
 # 只要解析确定性，绝对精度不重要：建立与比较用同一解析，地板自洽。
@@ -117,6 +159,14 @@ extract_count() {
     _c=$(printf '%s\n' "$_o" | grep -cE '^[[:space:]]*--- PASS:')   # go test -v
     [ "$_c" -gt 0 ] && _n=$_c
   fi
+  # JUnit / Maven Surefire："Tests run: N, Failures: 0, Errors: 0"。B2 仅在 verify-cmd 已绿
+  # （exit 0）时运行，正常配置下 failures/errors=0、run 数即通过数；多模块各打一行 → 求和。
+  # 边界（诚实）：若 Maven 配 testFailureIgnore=true 让失败仍 exit 0，run 数会含失败数——此时基线被
+  # 高估。规避：verify-cmd 别用 ignore-failures 的命令（让失败真的非 0），或用结构化报告（见下）。
+  # 注：grep 解析有天花板（见文件头与 verify 技能）——结构化报告（--reporter json/JUnit XML +
+  # 项目自带阈值/退出码）才是可靠路径，本解析仅作 best-effort 兜底，认不出则由 check_count_baseline
+  # 据"有无基线"裁决（无基线 establish-degrade-open、有基线变不可解析则按绕过打回）。
+  [ -z "$_n" ] && _n=$(printf '%s\n' "$_o" | grep -oiE 'tests? run: [0-9]+' | grep -oE '[0-9]+' | awk '{s+=$1} END{if(NR)print s}')
   # 防 bignum 投毒：runner 输出里的 "99999999999999999999 passed" 会被求和成超 int64 的数，
   # 一旦写进基线，后续 `[ -lt ]` 比较出错被静默吞成 false → 测试数暴跌反被放行。
   # 源头截断：>18 位（必超真实测试规模、且超 int64 安全域）一律视为无法解析（不污染基线；后续放行/打回同样由 check_count_baseline 据有无基线裁决）。
@@ -210,23 +260,23 @@ verify_fingerprint() {
     cat "$RCMD_FILE" 2>/dev/null                  # B3 燃料变更须使缓存失效（否则改 robustness-cmd 后 false-skip）
     cat "$COV_FILE" 2>/dev/null                   # B4 燃料同理
     cat "$COVMIN_FILE" 2>/dev/null                # 覆盖率地板变更亦须使缓存失效
+    cat "$COUNT_FILE" 2>/dev/null                 # I-1：B2 基线纳入指纹——改低 test-count 须使缓存失效，
+    cat "$RCOUNT_FILE" 2>/dev/null                # 否则开 verify-cache 时改低基线不变指纹 → false-skip 穿透 A/B/B2/B3
+    # （副作用：首次 establish 基线后下一轮指纹必变、会多跑一次，之后稳定——fail-safe-to-run，可接受）
     git rev-parse --show-toplevel 2>/dev/null    # 仓库绝对路径 + 机器身份：
     uname -srm 2>/dev/null                        # 令被提交/共享的 .last-green 在异机/异路径不误匹配
   } | _hash
 }
 
 # ---------- 降本：跳过"自上次绿以来状态未变"（严格 opt-in：docs/flow/verify-cache 存在时）----------
-# 默认关闭 → 门行为不变、依旧每次全验。开启后：指纹与上次绿相同即放行不重跑（含 A/B/B2）；
-# 指纹相同意味着源码与 verify-cmd 均未变，上次绿的结论仍成立，跳过安全。
+# 默认关闭 → 门行为不变、依旧每次全验。开启后只缓存掉【昂贵的 verify-cmd 执行】（B/B2/B3/B4）。
+# 重要（Codex 四轮发现）：缓存命中的 exit 0 刻意放到 A 完整性门 + A0c 基线门【之后】，让这些【廉价】
+# 检查即便缓存命中也 always 跑。否则 .last-green 只是个普通文件，agent 改低基线/删断言后自行伪造一份
+# 匹配篡改态的 .last-green（无需 commit）即可让顶部 exit 0 穿透所有门。此处只在此【计算】指纹、不早退。
 CACHE_FLAG="docs/flow/verify-cache"
 LASTGREEN="docs/flow/.last-green"
 FP=''
-if [ -f "$CACHE_FLAG" ]; then
-  FP=$(verify_fingerprint)
-  if [ -n "$FP" ] && [ -f "$LASTGREEN" ] && [ "$FP" = "$(cat "$LASTGREEN" 2>/dev/null)" ]; then
-    exit 0
-  fi
-fi
+[ -f "$CACHE_FLAG" ] && FP=$(verify_fingerprint)
 
 # ---------- A. 完整性门（git 仓库内）：禁止靠弱化测试"变绿" ----------
 SKIP_RE='(\.(skip|only|todo)\(|(xit|xdescribe|fit|fdescribe|xtest)\(|(it|test|describe)\.(skip|todo)|@pytest\.mark\.(skip|xfail)|@unittest\.skip|pytest\.skip\(|t\.Skip(Now|f)?\(|b\.Skip(Now|f)?\(|#\[ignore\])'
@@ -245,6 +295,11 @@ if command -v git >/dev/null 2>&1 \
     exit 2
   fi
 
+  # A0c. 已提交基线被未提交改低（绕过计数门）→ 打回（C-1）。fuel 文件的"任何改动即打回"由上面 A0 管；
+  # 基线文件因 hook 自动写，只拦【改低】（见 check_baseline_not_lowered）。
+  check_baseline_not_lowered "$COUNT_FILE"  || exit 2
+  check_baseline_not_lowered "$RCOUNT_FILE" || exit 2
+
   # A0b. 测试文件被 assume-unchanged / skip-worktree → git diff 失明，整门被静默架空。
   if git ls-files -v -- "$TS1" "$TS2" "$TS3" "$TS4" "$EXCL" 2>/dev/null | grep -Eq '^([a-z]|S) '; then
     {
@@ -259,15 +314,21 @@ if command -v git >/dev/null 2>&1 \
     VIOL=''
 
     # 占用数计数（grep -oE 数命中次数，非命中行数）——堵"一行挤多个删除/凑数"。
+    # 排除 diff 文件头（`+++ ` / `--- `，带尾空格）而非用 '^\+[^+]'：后者会把首字符为 +/- 的【内容行】
+    # （如 JS 一元 `+expect(x)`）也排掉（Codex 证伪指出的过宽）。改为只剔带尾空格的真头，保留 `+expect`。
+    # 否则路径含断言关键词的文件头（+++ b/tests/assert_helpers_test.js 命中 "assert"）会被误计为
+    # "新增断言/标记"，抬高 ADD 抵消真实 DEL，使净减少/净新增判定失效（C-2 假阴性）。两侧对称。
+    # 已知残留（可忽略）：内容行恰以 `++ `/`-- ` 开头（diff 呈 `+++ `/`--- `）会被误当头剔除——但真实
+    # 测试代码几乎不存在以 `++ `/`-- ` 起行的断言/skip 行；不为此引入 noprefix 脆弱性（见 verify 技能）。
     # A1. 净新增跳过/忽略标记。
-    SKIP_ADD=$(printf '%s\n' "$TDIFF" | grep -E '^\+'    | grep -oE  "$SKIP_RE"   | grep -c .)
-    SKIP_DEL=$(printf '%s\n' "$TDIFF" | grep -E '^-[^-]' | grep -oE  "$SKIP_RE"   | grep -c .)
+    SKIP_ADD=$(printf '%s\n' "$TDIFF" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -oE  "$SKIP_RE"   | grep -c .)
+    SKIP_DEL=$(printf '%s\n' "$TDIFF" | grep -E '^-' | grep -vE '^--- '     | grep -oE  "$SKIP_RE"   | grep -c .)
     [ "$SKIP_ADD" -gt "$SKIP_DEL" ] && \
       VIOL="${VIOL}- 净新增了跳过/忽略测试的标记（skip/only/todo/xit/xtest/@skip/t.Skip(f)/#[ignore]）\n"
 
     # A2. 断言"净减少"（删 > 增，避免重命名/跨文件搬移断言误报）。
-    ASS_DEL=$(printf '%s\n' "$TDIFF" | grep -E '^-[^-]' | grep -oiE "$ASSERT_RE" | grep -c .)
-    ASS_ADD=$(printf '%s\n' "$TDIFF" | grep -E '^\+'    | grep -oiE "$ASSERT_RE" | grep -c .)
+    ASS_DEL=$(printf '%s\n' "$TDIFF" | grep -E '^-' | grep -vE '^--- '     | grep -oiE "$ASSERT_RE" | grep -c .)
+    ASS_ADD=$(printf '%s\n' "$TDIFF" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -oiE "$ASSERT_RE" | grep -c .)
     [ "$ASS_DEL" -gt "$ASS_ADD" ] && \
       VIOL="${VIOL}- 测试断言净减少（删 ${ASS_DEL} > 增 ${ASS_ADD}：assert/expect/should/t.Error…）\n"
 
@@ -289,6 +350,13 @@ if command -v git >/dev/null 2>&1 \
   fi
 fi
 
+# ---------- 缓存命中早退（在 A 完整性门 + A0c 基线门【之后】）----------
+# 此处 A/A0c 已跑过（above）。指纹与上次绿相同 → 源码/verify-cmd/基线均未变，上次绿结论仍成立，
+# 可安全跳过【昂贵的】B/B2/B3/B4（verify-cmd 执行）。伪造 .last-green 也只能跳过 B，跳不过已跑完的 A。
+if [ -f "$CACHE_FLAG" ] && [ -n "$FP" ] && [ -f "$LASTGREEN" ] && [ "$FP" = "$(cat "$LASTGREEN" 2>/dev/null)" ]; then
+  exit 0
+fi
+
 # ---------- B. 验证命令门 ----------
 OUT=$(sh -c "$CMD" 2>&1)
 CODE=$?
@@ -307,6 +375,10 @@ fi
 # ---------- B2. 测试数基线门（命令已绿）----------
 # 解析通过数；与基线比。缺失则建立（establish-if-missing），低于基线即打回。
 # 不向上 ratchet（避免 env 波动把地板锁到高水位后误门控）；正当下降经已提交豁免接受并刷新。
+# C-1 二次校验（Codex 三轮发现）：A0c 在跑 verify-cmd【之前】校验过基线；但 verify-cmd 执行期间
+# 被测代码/测试可能把 test-count 改低/删/改垃圾（运行时 side-effect 绕过，无需 commit）。故在 B2
+# 读基线【之前】、verify-cmd 跑完【之后】再校验一次，堵"跑测时篡改基线"。非 git 时 no-op。
+check_baseline_not_lowered "$COUNT_FILE" || exit 2
 check_count_baseline "$OUT" "$COUNT_FILE" "测试数基线门" || exit 2
 
 # ---------- B3. 健壮性门（命令已绿；严格 opt-in：docs/flow/robustness-cmd 存在且非空时生效）----------
@@ -329,6 +401,7 @@ if [ -f "$RCMD_FILE" ]; then
       } >&2
       exit 2
     fi
+    check_baseline_not_lowered "$RCOUNT_FILE" || exit 2   # C-1 二次校验：堵 robustness-cmd 跑测期间篡改基线
     check_count_baseline "$ROUT" "$RCOUNT_FILE" "健壮性数基线门" || exit 2
   fi
 fi

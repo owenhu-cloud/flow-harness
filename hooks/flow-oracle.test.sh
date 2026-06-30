@@ -201,11 +201,39 @@ git add -A; git commit -qm base
 run "count drop + committed override → pass" 0 "$NOSTOP"
 assert_file "baseline refreshed to 2" docs/flow/test-count 2
 
-# docs/flow/ 被排除：删 docs/flow/test-count 不应被当成"删测试文件"
+# 删 docs/flow/test-count 不被当成"删测试文件"（A3 排除 docs/flow），但【已提交基线被删】会被
+# C-1/A0c 拦（清零地板绕过）。故此处期望 block——并非 A3 误报，是 C-1 防绕过（见 cC1d 注释）。
 newdir cB9; setcmd 'true'; gitinit
 printf '3\n' > docs/flow/test-count; git add -A; git commit -qm base
 git rm -q docs/flow/test-count
-run "delete docs/flow/test-count (excluded) → pass" 0 "$NOSTOP"
+run "delete committed test-count → C-1 block（防清零地板）" 2 "$NOSTOP"
+# 已提交豁免下删基线 → 放行（正当移除）
+newdir cB9b; setcmd 'true'; gitinit
+printf '3\n' > docs/flow/test-count; touch docs/flow/verify-allow-test-changes; git add -A; git commit -qm base
+git rm -q docs/flow/test-count
+run "delete committed test-count + committed override → pass" 0 "$NOSTOP"
+# C-1(d)：verify-cmd 执行【期间】把已提交基线改低（运行时 side-effect 绕过）→ B2 前二次校验 block
+# （Codex 三轮发现：A0c 只在 verify 前跑一次，verify 期间篡改基线则 B2 信任被篡改值）。
+newdir cB9e; gitinit
+printf '100\n' > docs/flow/test-count; git add -A; git commit -qm base
+setcmd "printf '0\\n' > docs/flow/test-count; echo '10 passed'; true"   # 跑测时把基线改低到 0
+run "C-1(d): tamper baseline during verify-cmd → B2 re-check block" 2 "$NOSTOP"
+# C-1(d)：verify 期间删除已提交基线 → 二次校验 block
+newdir cB9f; gitinit
+printf '100\n' > docs/flow/test-count; git add -A; git commit -qm base
+setcmd "rm -f docs/flow/test-count; echo '10 passed'; true"
+run "C-1(d): delete baseline during verify-cmd → re-check block" 2 "$NOSTOP"
+
+# C-1(c)：把已提交数值基线改成无数字垃圾 → 令计数门失效 → block（Codex 二轮发现的第三绕过）
+newdir cB9c; setcmd 'echo "1 passed"; true'; gitinit
+printf '5\n' > docs/flow/test-count; git add -A; git commit -qm base
+printf 'garbage-no-digits\n' > docs/flow/test-count
+run "C-1(c): committed baseline → non-numeric garbage → block" 2 "$NOSTOP"
+# 同上但已提交豁免 → 放行
+newdir cB9d; setcmd 'echo "1 passed"; true'; gitinit
+printf '5\n' > docs/flow/test-count; touch docs/flow/verify-allow-test-changes; git add -A; git commit -qm base
+printf 'garbage\n' > docs/flow/test-count
+run "C-1(c): garbage baseline + committed override → pass" 0 "$NOSTOP"
 
 # 多 suite 求和（10+2=12）：用 tail 会得 2(<5 误 block)，求和得 12(>=5) → pass，证伪 tail
 newdir cB10; setcmd "printf 'suite A\\n10 passed\\nsuite B\\n2 passed\\n'"; printf '5\n' > docs/flow/test-count
@@ -218,6 +246,46 @@ run "multi-suite SUM (12<15) → block" 2 "$NOSTOP"
 newdir cB12; setcmd "printf '0 passed\n'"
 run "establish '0 passed' (TOFU) → pass" 0 "$NOSTOP"
 assert_file "TOFU locks baseline=0" docs/flow/test-count 0
+
+# ---- C-2：+++ 文件头不应被误计为新增断言（修复前：路径含 assert 的文件头抵消真实删除）----
+# 删掉文件里唯一真断言，文件名含 "assert" → 修复前 ASS_ADD 被 +++ 头抬到 1 抵消 → 漏放行；修复后应 block。
+newdir cC2bug; setcmd 'true'; gitinit
+mkdir -p tests; printf 'test("a", () => {\n  expect(value).toBe(42)\n})\n' > tests/assert_helpers_test.js
+git add -A; git commit -qm base
+printf 'test("a", () => {\n})\n' > tests/assert_helpers_test.js
+run "C-2: delete assertion in assert-named file → block (+++ header not counted)" 2 "$NOSTOP"
+
+# ---- C-3：JUnit/Maven "Tests run: N" 格式解析（verify-cmd 已绿故 run==pass）----
+newdir cC3a; setcmd "printf 'Tests run: 5, Failures: 0, Errors: 0, Skipped: 0\n'"
+run "C-3: JUnit 'Tests run: 5' establish → pass" 0 "$NOSTOP"
+assert_file "C-3: baseline from Tests run = 5" docs/flow/test-count 5
+newdir cC3b; setcmd "printf 'Tests run: 3, Failures: 0, Errors: 0\n'"; printf '5\n' > docs/flow/test-count
+run "C-3: 'Tests run: 3' < baseline 5 → block" 2 "$NOSTOP"
+
+# ---- C-1：已提交基线被未提交改低 → A0c 打回；已提交豁免 → 放行 ----
+newdir cC1a; setcmd 'echo "9 passed"; true'; gitinit
+printf '5\n' > docs/flow/test-count; git add -A; git commit -qm base
+printf '2\n' > docs/flow/test-count                       # 工作树偷偷改低（5→2），未提交、无豁免
+run "C-1: committed baseline lowered uncommitted → A0c block" 2 "$NOSTOP"
+newdir cC1b; setcmd 'echo "9 passed"; true'; gitinit
+printf '5\n' > docs/flow/test-count; touch docs/flow/verify-allow-test-changes
+git add -A; git commit -qm base                           # 豁免已提交
+printf '2\n' > docs/flow/test-count                       # 正当改低（已提交豁免）
+run "C-1: lowered + committed override → pass" 0 "$NOSTOP"
+newdir cC1c; setcmd 'echo "9 passed"; true'; gitinit
+printf '5\n' > docs/flow/test-count; git add -A; git commit -qm base
+printf '8\n' > docs/flow/test-count                       # 调高（非改低）→ 不应被 C-1 拦
+run "C-1: baseline raised (not lowered) → pass" 0 "$NOSTOP"
+
+# ---- I-1：verify-cache 指纹纳入 test-count——改基线须使缓存失效（否则 false-skip 穿透门）----
+# 调高 test-count（避开 C-1 改低拦截，隔离验证指纹敏感性）→ 指纹变 → 命令重跑。
+newdir cI1; gitinit; printf 'src\n' > app.js
+printf '3\n' > docs/flow/test-count; git add -A; git commit -qm base
+touch docs/flow/verify-cache; setcmd "printf 'RAN\\n' >> docs/flow/runmarker; printf '9 passed\\n'"
+run "I-1: cache establish (baseline tracked) → pass" 0 "$NOSTOP"
+printf '4\n' > docs/flow/test-count                       # 改基线（3→4，调高）
+run "I-1: test-count changed → fingerprint invalidated → re-run → pass" 0 "$NOSTOP"
+assert_file "I-1: cmd re-ran on baseline change (RANRAN)" docs/flow/runmarker RANRAN
 
 # ---- 降本：skip-if-unchanged（opt-in docs/flow/verify-cache）----
 # 建立 → 状态未变第二次跳过（命令只跑一次；marker 落 docs/flow，被指纹排除不自扰动）
@@ -246,6 +314,30 @@ run "cache: verify-cmd changed → re-run → block" 2 "$NOSTOP"
 newdir cC3; gitinit; printf 'src\n' > app.js; git add -A; git commit -qm base
 setcmd 'false'
 run "cache OFF by default → runs → block" 2 "$NOSTOP"
+
+# Codex 四轮：缓存命中早退已移到 A 完整性门 + A0c 基线门【之后】。即便 agent 改低已提交基线并【伪造】
+# 一份匹配篡改态的 .last-green（无需 commit），A0c 仍在缓存早退前跑、拦下改低 → block。
+# 复刻 verify_fingerprint 计算 FP(篡改态) 写入 .last-green，制造"完美缓存命中"，断言仍被 A0c 拦。
+fp_replica() {  # 与 flow-oracle.sh verify_fingerprint 同源（测试需随其更新）
+  _excl=':(exclude)docs/flow/*'
+  { git rev-parse HEAD 2>/dev/null
+    git diff HEAD -- . "$_excl" 2>/dev/null
+    git ls-files --others --exclude-standard -- . "$_excl" 2>/dev/null \
+      | while IFS= read -r _f; do printf '== %s\n' "$_f"; cat "$_f" 2>/dev/null; done
+    cat docs/flow/verify-cmd 2>/dev/null; cat docs/flow/robustness-cmd 2>/dev/null
+    cat docs/flow/coverage-cmd 2>/dev/null; cat docs/flow/coverage-min 2>/dev/null
+    cat docs/flow/test-count 2>/dev/null; cat docs/flow/robustness-count 2>/dev/null
+    git rev-parse --show-toplevel 2>/dev/null; uname -srm 2>/dev/null
+  } | { if command -v shasum >/dev/null 2>&1; then shasum | awk '{print $1}'
+        elif command -v sha1sum >/dev/null 2>&1; then sha1sum | awk '{print $1}'
+        else cksum | awk '{print $1"-"$2}'; fi; }
+}
+newdir cCF; gitinit; printf 'src\n' > app.js
+printf '100\n' > docs/flow/test-count; printf 'echo "9 passed"; true\n' > docs/flow/verify-cmd
+touch docs/flow/verify-cache; git add -A; git commit -qm base
+printf '1\n' > docs/flow/test-count                       # 改低已提交基线（100→1），未提交、无豁免
+fp_replica > docs/flow/.last-green                         # 伪造匹配篡改态的 .last-green（完美命中）
+run "forged .last-green + lowered baseline → A0c blocks before cache exit" 2 "$NOSTOP"
 
 # 非 git + 开了缓存 → 指纹为空 → fail-safe-to-run，永不跳过
 newdir cC5; touch docs/flow/verify-cache; setcmd 'false'

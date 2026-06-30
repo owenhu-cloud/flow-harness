@@ -3,5 +3,6 @@
 *.swp
 .idea/
 
-# 仓库自身开发时 harvest 出的经验（本地保留，不入公开仓库）
-lessons/
+# 注：lessons/ 是本仓 dogfood Flow 时 harvest 出的「仓库维度」开发经验，已纳入版本控制
+# （随插件发布，对安装用户可见为参考）。不再 gitignore——它记录的是真实踩坑根因，属仓库资产。
+# 端用户项目自己的 lessons 由 harvest 写入各自项目，与本仓无关。

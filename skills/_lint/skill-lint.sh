@@ -35,6 +35,21 @@ lint_one() {
     esac
     [ -e "$path" ] || { echo "ERROR[$name]: 引用了不存在的 $r"; err=1; }
   done
+  # 统一结尾红线句（硬错）：除 flow 根技能（红线的定义源，自指无意义）外，每支 SKILL.md
+  # 末行必须是『遵循 `flow` 技能的质量红线。』——堵「新技能漏挂红线锚、各写各的结尾」漂移。
+  case "$name" in
+    flow) : ;;
+    *) _last=$(grep -v '^[[:space:]]*$' "$f" | tail -n1)
+       [ "$_last" = '遵循 `flow` 技能的质量红线。' ] \
+         || { echo "ERROR[$name]: 末行须为统一红线句『遵循 \`flow\` 技能的质量红线。』(实际: $_last)"; err=1; } ;;
+  esac
+  # 双语 description（硬错）：description 须含英文检索段（' · EN:' 约定），保证跨语言可被技能发现。
+  _desc=$(sed -n 's/^description:[[:space:]]*//p' "$f" | head -n1)
+  case "$_desc" in
+    "") echo "ERROR[$name]: frontmatter 缺 description"; err=1 ;;
+    *EN:*) : ;;
+    *) echo "ERROR[$name]: description 缺英文段（约定含 ' · EN:'）"; err=1 ;;
+  esac
   # 软警告：行为塑造类（含「铁律」）应配红线表与 checklist
   if grep -q '铁律' "$f"; then
     grep -q '红线' "$f" || echo "WARN[$name]: 含铁律但未见『红线』段"
@@ -42,13 +57,29 @@ lint_one() {
   fi
 }
 
+# 仓库级断言（非按技能）：README/flow 的对外硬话与 hook 真实行为不得漂移。
+# Oracle 仅在 docs/flow/verify-cmd 在场时阻止 Stop——任何「无法绕过」表述须与 'verify-cmd' 限定词
+# 同行，否则即过满表述（误导用户「装上即强保护」）。堵 README↔机制漂移（用户点名问题）。
+lint_claims() {
+  for cf in "$ROOT/../README.md" "$ROOT/flow/SKILL.md"; do
+    [ -f "$cf" ] || continue
+    if grep -n '无法绕过\|不可绕过' "$cf" 2>/dev/null | grep -v 'verify-cmd' | grep -q .; then
+      echo "ERROR[claims]: $(basename "$cf") 有『无法绕过』未与 'verify-cmd' 限定词同行（过满；Oracle 仅 verify-cmd 在场时阻止 Stop）"
+      grep -n '无法绕过\|不可绕过' "$cf" | grep -v 'verify-cmd' | sed 's/^/    /'
+      err=1
+    fi
+  done
+}
+
 if [ "${1:-}" = "--all" ]; then
   for d in "$ROOT"/*/; do
     case "$(basename "$d")" in _*) continue ;; esac
     lint_one "$d"
   done
+  lint_claims
 elif [ $# -eq 1 ]; then
   lint_one "$ROOT/$1"
+  lint_claims
 else
   echo "usage: skill-lint.sh <name>|--all" >&2; exit 2
 fi
