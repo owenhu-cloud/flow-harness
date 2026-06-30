@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Flow harness 单插件市场：把 Flow 工作流作为原生 Claude Code 插件分发。",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "plugins": [
     {
