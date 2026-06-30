@@ -528,8 +528,8 @@ printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","nam
               '{"type":"assistant","message":{"content":[{"type":"text","text":"done editing"}]}}' > tx.jsonl
 run "edits + no intent → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
 
-# 改了文件且 assistant 产出过意图契约 → 放行
-newdir cIntent2; setcmd 'true'
+# 改了文件且 assistant 产出过意图契约 → 放行（关 A2 技能门以隔离 A1）
+newdir cIntent2; setcmd 'true'; : > docs/flow/skill-gate-off
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: add feature X"}]}}' \
               '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
 run "edits + assistant intent → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
@@ -548,7 +548,7 @@ run "intent only in tool payload (not assistant text) + edits → block" 2 '{"st
 # 既定边界（诚实记录·Codex 二轮）：单条 assistant 行同时含 text 块(无 Intent) + tool_use payload(含 Intent)
 #   → 行级 grep 漏放(pass)。属「宁漏放不误杀」+ 非安全边界取舍；真实 transcript text/tool_use 不同行(已验证)，
 #   此对抗形态不出现。若此例哪天该收紧，改 A1 为块级解析并把期望改为 2。
-newdir cIntent9; setcmd 'true'
+newdir cIntent9; setcmd 'true'; : > docs/flow/skill-gate-off
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"editing now"},{"type":"tool_use","name":"Write","input":{"content":"Intent: 文件正文"}}]}}' > tx.jsonl
 run "mixed text+tooluse line, intent only in payload → fail-open pass (documented漏放)" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
 
@@ -558,7 +558,7 @@ printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"
 run "no edit tools → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
 
 # opt-out 文件在场 → 关闭本门 → 放行
-newdir cIntent5; setcmd 'true'; : > docs/flow/intent-gate-off
+newdir cIntent5; setcmd 'true'; : > docs/flow/intent-gate-off; : > docs/flow/skill-gate-off
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
 run "intent-gate-off opt-out → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
 
@@ -570,6 +570,59 @@ run "missing transcript → fail-open pass" 0 '{"stop_hook_active":false,"transc
 newdir cIntent7; setcmd 'true'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
 run "no transcript_path field → fail-open pass" 0 "$NOSTOP"
+
+# ---- A2. 流程技能使用门（治"判档后不加载流程技能、凭记忆走"）----
+# 真实 Skill 标记：同行 "name":"Skill" + "skill":"<名>"。fixtures 都带 assistant text "Intent:" 以先过 A1，隔离 A2。
+# A2-1：改了文件 + 全程无任何 Skill 流程技能加载 → block
+newdir cSkill1; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: do the change"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + no process-skill load → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-2：改了文件 + 真实加载过 implement 技能 → pass
+newdir cSkill2; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: do the change"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"implement"}}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + loaded implement skill → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-3：只加载了 flow(判档)、没加载流程技能 + 改了文件 → block（flow 不算流程技能）
+newdir cSkill3; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: do the change"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"flow"}}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + only flow loaded (no process skill) → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-3b 反空转：assistant 正文讨论 "skill":"implement" 但非真 Skill tool_use → 不算 → 仍 block
+newdir cSkill3b; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: x. 我打算用 \"skill\":\"implement\" 来做"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + skill name only in prose (no Skill tool_use) → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-4：没用编辑工具（纯问答）→ pass
+newdir cSkill4; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: just answering"}]}}' > tx.jsonl
+run "no edits → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-5：opt-out skill-gate-off → pass（即便改了文件且无流程技能）
+newdir cSkill5; setcmd 'true'; : > docs/flow/skill-gate-off
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: do the change"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "skill-gate-off opt-out → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-6（Codex 证伪修复）：加载了非核心技能 diagram（不在旧白名单）+ 编辑 → pass（任一非 flow/flow-doctor 技能即满足）
+newdir cSkill6; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: draw it"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"diagram"}}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + loaded diagram (non-core) → pass" 0 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
+
+# A2-7：只加载了 flow-doctor（体检诊断，不算走阶段技能）+ 编辑 → block
+newdir cSkill7; setcmd 'true'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Intent: do it"}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"flow-doctor"}}]}}' \
+              '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}' > tx.jsonl
+run "edits + only flow-doctor (diagnostic) → block" 2 '{"stop_hook_active":false,"transcript_path":"'"$WORK"'/tx.jsonl"}'
 
 printf '\n==== %s passed, %s failed ====\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

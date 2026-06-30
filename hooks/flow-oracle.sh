@@ -2,12 +2,14 @@
 # Flow 治"自说自话"：独立 Oracle。agent 试图结束（Stop）时，由本 hook —— 一个
 # 与 agent 无关的进程 —— 裁决"完成"。完成不再由 agent 自说自话，而由机制裁决。
 #
-# 六道独立门，任一不过即 exit 2 打回：
+# 七道独立门，任一不过即 exit 2 打回：
 #   A1. 意图契约门：本会话用编辑工具改了文件、却无任何 agent 正文(text)消息产出过意图锚 → 打回
 #       （治"装了也不懂用户意图"）。机器锚：存在一条「含 "type":"text" 块且该行有 `Intent:` 子串」的
 #       assistant 行（行级近似，非块级解析；纯 tool_use payload 的 Intent 被排除，混行边界见 A1 段注释）。
 #       四行完整性(Intent/Constraints/Non-goals/Verify-signal)属纪律级(router+reinject)，非机器校验。
 #       会话级、保守、fail-open（任何歧义即放行）；opt-out：建 docs/flow/intent-gate-off。
+#   A2. 流程技能使用门：本会话用编辑工具改了文件、却整程没 Skill 加载过任何流程技能(只加载 flow 判档不算) → 打回
+#       （治"判档后凭记忆走、不加载 implement/verify 等技能纪律"）。会话级、fail-open；opt-out：docs/flow/skill-gate-off。
 #   A. 完整性门：扫 git diff，禁止靠删测试 / 注入 skip / 删断言来"变绿"（语法层守卫）。
 #   B. 验证命令门：跑 docs/flow/verify-cmd，退出码即裁决。
 #   B2. 测试数基线门：解析 runner 输出的"通过数"，低于 docs/flow/test-count 即打回
@@ -102,6 +104,9 @@ CMD=$(grep -v '^[[:space:]]*#' "$CMD_FILE" | grep -v '^[[:space:]]*$' \
       | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
 [ -n "$CMD" ] || exit 0               # 空命令：放行（视为该项目无法自动验证）
 
+# transcript_path 抽取（A1 意图门 / A2 技能使用门共用；无 / 不可读 → 两门皆 fail-open 放行）。
+_tx=$(printf '%s' "$INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+
 # ---------- A1. 意图契约门（治"指令理解"；会话级、保守、fail-open）----------
 # 仅当 transcript 可读、本会话【确实用编辑工具改过文件】、却【无任何 assistant 消息产出过意图契约】时打回。
 # 关键设计：意图锚要求所在 assistant 行含 "type":"text" 块（行级近似，非块级 JSON 解析）——router/reinject
@@ -115,7 +120,6 @@ CMD=$(grep -v '^[[:space:]]*#' "$CMD_FILE" | grep -v '^[[:space:]]*$' \
 # 三个判定子串（"name":"Write/Edit/MultiEdit"、"type":"assistant"、"type":"text"）是 transcript 稳定约定。
 # opt-out：建 docs/flow/intent-gate-off 即关闭本门（零侵入回退）。无 transcript_path / 不可读 → 放行。
 if [ ! -f "docs/flow/intent-gate-off" ]; then
-  _tx=$(printf '%s' "$INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
   if [ -n "$_tx" ] && [ -f "$_tx" ]; then
     if grep -qE '"name":[[:space:]]*"(Write|Edit|MultiEdit)"' "$_tx" 2>/dev/null \
        && ! grep -E '"type":[[:space:]]*"assistant"' "$_tx" 2>/dev/null \
@@ -125,6 +129,35 @@ if [ ! -f "docs/flow/intent-gate-off" ]; then
         printf '[Flow Oracle] 意图契约门未通过：本会话用编辑工具改了文件，但全程无 agent 产出过意图契约。\n'
         printf '动手改文件前应先产出四行：Intent / Constraints / Non-goals / Verify-signal（可观测）。\n'
         printf '补上意图契约即可收尾；该项目确实不需要则建 docs/flow/intent-gate-off 关闭本门。\n'
+      } >&2
+      exit 2
+    fi
+  fi
+fi
+
+# ---------- A2. 流程技能使用门（治"判档后不再加载流程技能、凭记忆走"；会话级、fail-open）----------
+# 三模型 Round-3 一致结论：Flow 唯一弱点是「判档后无机制确保真去 Skill 加载流程技能」(纯提示词，agent 可无视)。
+# 本门：transcript 显示本会话用了编辑工具、却【整程没有任何一次 Skill 加载过流程技能】→ 打回。
+# 真实标记（实测本会话 transcript，非臆造，Codex 明确要求勿猜）：一次 Skill 调用 = 同一 JSONL 行含
+#   "name":"Skill" 且含 "skill":"<技能名>"。只认结构化 Skill tool_use；assistant 正文里讨论技能名（如本注释）
+#   在 transcript 存储时被 JSON 转义（\"name\":\"Skill\"），不匹配未转义模式，故不会空转（cSkill3b 回归验证）。
+# 判定改为【加载过任一 flow/flow-doctor 以外的技能即满足】（Codex 证伪：白名单漏 diagram/harvest/cross-execute/
+#   writing-skills 会误杀合法会话）——flow 只判档路由、flow-doctor 只体检诊断，二者不算"走某阶段技能纪律"。
+# 会话级（非每轮重拉，避免新仪式/上下文膨胀）、fail-open（无 transcript/不可读/歧义即放行）；
+# opt-out：建 docs/flow/skill-gate-off 即关闭本门（零侵入回退）。
+# 触发边界（诚实，与 A1 一致）：以 transcript 出现 Write/Edit/MultiEdit 为触发，不看工具是否成功/是否产生净 diff，
+#   故失败的 Write、已回滚/no-op 编辑、同会话旧任务残留编辑可能误杀——属本门 fail-open+opt-out+会话级取舍；
+#   宁可个别误拦促使补加载，不漏放"改了文件全程零技能"的真问题。需要时可在该项目写 skill-gate-off 关闭。
+if [ ! -f "docs/flow/skill-gate-off" ]; then
+  if [ -n "$_tx" ] && [ -f "$_tx" ]; then
+    if grep -qE '"name":[[:space:]]*"(Write|Edit|MultiEdit)"' "$_tx" 2>/dev/null \
+       && ! grep -E '"name":[[:space:]]*"Skill"' "$_tx" 2>/dev/null \
+            | grep -oE '"skill":[[:space:]]*"[^"]+"' \
+            | grep -qvE '"skill":[[:space:]]*"(flow|flow-doctor)"'; then
+      {
+        printf '[Flow Oracle] 流程技能使用门未通过：本会话用编辑工具改了文件，但全程未 Skill 加载过任何流程技能。\n'
+        printf '判档后应按档位用 Skill 工具加载对应技能（R1+：implement→verify；R2/R3：brainstorm/plan/…），别凭记忆走。\n'
+        printf '加载相应流程技能后再收尾；该项目确实不需要则建 docs/flow/skill-gate-off 关闭本门。\n'
       } >&2
       exit 2
     fi

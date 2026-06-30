@@ -21,7 +21,7 @@ case "$INPUT_LC" in
 esac
 
 # 静态文案用单引号保留字面反引号；变量拼接不会二次求值其值内的反引号，故安全。
-BASE='[Flow] 动手工程任务前先用 `flow` 技能判档(R0–R3)并按档走流程；首次进入某代码库先用 `profile` 固化项目画像。动手改文件前先产出意图契约四行 Intent/Constraints/Non-goals/Verify-signal(可观测)，确认理解再动手。完成声明必带同轮新鲜验证输出，且完成由 Stop hook 的独立 Oracle 复核。'
+BASE='[Flow] 动手工程任务前先用 `flow` 技能判档(R0–R3)并按档走流程；首次进入某代码库先用 `profile` 固化项目画像。判档后按档位用 `Skill` 工具加载对应流程技能（R1+ 写码前 `implement`、收尾前 `verify`；R2/R3 先 `brainstorm`/`plan`），别只判档就凭记忆走。动手改文件前先产出意图契约四行 Intent/Constraints/Non-goals/Verify-signal(可观测)，确认理解再动手。完成声明必带同轮新鲜验证输出，且完成由 Stop hook 的独立 Oracle 复核。'
 CTX="$BASE"
 [ -n "$FLOOR" ] && CTX="$BASE $FLOOR"
 printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$CTX"
