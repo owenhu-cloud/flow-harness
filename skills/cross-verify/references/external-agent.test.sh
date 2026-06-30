@@ -20,6 +20,7 @@ cat > "$TMP/argcodex" <<'EOF'
 #!/bin/sh
 [ -n "${ARGLOG:-}" ] && printf '%s\n' "$@" > "$ARGLOG"
 [ -n "${PWDLOG:-}" ] && pwd > "$PWDLOG"
+[ -n "${STDINLOG:-}" ] && cat > "$STDINLOG"     # I-2：捕获经 stdin 传入的 prompt
 echo "Major | line 5 | unguarded map write under concurrency"
 EOF
 printf '#!/bin/sh\nexit 7\n' > "$TMP/failcodex"          # 失败
@@ -27,7 +28,7 @@ printf '#!/bin/sh\n:\n'     > "$TMP/emptycodex"          # 成功但零输出
 chmod +x "$TMP/argcodex" "$TMP/failcodex" "$TMP/emptycodex"
 PF="$TMP/prompt"; SENT='SENT-A;B `C` $(D) "E"'           # 含特殊字符的单行哨兵
 printf '%s\n' "$SENT" > "$PF"
-OF="$TMP/out"; ALOG="$TMP/arglog"
+OF="$TMP/out"; ALOG="$TMP/arglog"; SLOG="$TMP/stdinlog"
 
 H="CODEX_HOME=$TMP/home"
 
@@ -36,10 +37,13 @@ env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/home" sh "$SUT" healthcheck code
 check 0 $? "healthcheck available -> 0"
 env CODEX_BIN="$TMP/nope"      CODEX_HOME="$TMP/home" sh "$SUT" healthcheck codex-cli
 check 3 $? "healthcheck missing-binary -> 3 (降级信号)"
-env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/noauth" sh "$SUT" healthcheck codex-mcp
+env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/noauth" sh "$SUT" healthcheck codex-cli
 check 3 $? "healthcheck no-auth -> 3"
 env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/home" sh "$SUT" healthcheck bogus 2>/dev/null
 check 1 $? "未知 adapter -> 1"
+# 改名去误导：codex-mcp 不再是脚本层适配器（真 MCP 在 skill 层），应作未知 adapter 拒绝
+env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/home" sh "$SUT" healthcheck codex-mcp 2>/dev/null
+check 1 $? "codex-mcp 已去除（脚本层）-> unknown adapter -> 1"
 
 # --- dispatch 退出码 ---
 env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/home" sh "$SUT" dispatch codex-cli "$PF" "$OF"
@@ -54,13 +58,14 @@ check 1 $? "dispatch 空输出 -> 1 (M3 守护)"
 env CODEX_BIN="$TMP/argcodex"  CODEX_HOME="$TMP/home" sh "$SUT" dispatch codex-cli "$TMP/nofile" "$OF" 2>/dev/null
 check 1 $? "dispatch prompt-file 不存在 -> 1 (M8 守护)"
 
-# --- argv 断言（守护参数构造，堵 M5/M6/M9）---
-env CODEX_BIN="$TMP/argcodex" CODEX_HOME="$TMP/home" CROSS_VERIFY_EFFORT=high ARGLOG="$ALOG" \
+# --- argv 断言（守护参数构造，堵 M5/M6/M9）+ I-2：prompt 经 stdin 而非 argv ---
+env CODEX_BIN="$TMP/argcodex" CODEX_HOME="$TMP/home" CROSS_VERIFY_EFFORT=high ARGLOG="$ALOG" STDINLOG="$SLOG" \
   sh "$SUT" dispatch codex-cli "$PF" "$OF"
 grep -qx -- '--sandbox' "$ALOG"; check 0 $? "argv 含 --sandbox (M6 守护)"
 grep -qx 'read-only'    "$ALOG"; check 0 $? "argv 含 read-only 沙箱值 (M6 守护：verifier 不许改码)"
 grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "argv effort 引号正确 (M9 守护)"
-grep -qxF "$SENT" "$ALOG"; check 0 $? "prompt 作单一 argv 原样传入、无分词无注入 (M5 守护)"
+grep -qxF "$SENT" "$SLOG"; check 0 $? "I-2: prompt 经 stdin 原样传入、无分词无注入 (M5 守护)"
+if grep -qF "$SENT" "$ALOG"; then check 0 1 "I-2: prompt 不应出现在 argv（避免 ARG_MAX）"; else check 0 0 "I-2: prompt 不在 argv（避免 ARG_MAX）"; fi
 
 # --- grok-cli 适配器（headless 只读 dispatch；无 dispatch-write）---
 # 复用 argcodex 作 grok stub（同样把 argv 写 ARGLOG、打印 canned 裁决）；GROK_HOME 控认证在场。
@@ -82,11 +87,13 @@ check 3 $? "grok dispatch 不可用 -> 3"
 env GROK_BIN="$TMP/emptycodex" GROK_HOME="$GH"    sh "$SUT" dispatch grok-cli "$PF" "$OF" 2>/dev/null
 check 1 $? "grok dispatch 空输出 -> 1"
 
-# argv 守护：只读模式标志在场、prompt 原样、且【不】含 effort/reasoning（默认模型不支持，会 400）
+# argv 守护：只读模式标志在场、prompt 经 --prompt-file（非 argv）、且【不】含 effort/reasoning（默认模型不支持，会 400）
 env GROK_BIN="$TMP/argcodex" GROK_HOME="$GH" ARGLOG="$ALOG" sh "$SUT" dispatch grok-cli "$PF" "$OF"
 grep -qx -- '--permission-mode' "$ALOG"; check 0 $? "grok argv 含 --permission-mode (只读守护)"
 grep -qx 'plan' "$ALOG";                 check 0 $? "grok argv 含 plan (只读模式值：verifier 不许改码)"
-grep -qxF "$SENT" "$ALOG";               check 0 $? "grok prompt 作单一 argv 原样传入"
+grep -qx -- '--prompt-file' "$ALOG";     check 0 $? "I-2: grok argv 含 --prompt-file"
+grep -qxF "$PF" "$ALOG";                 check 0 $? "I-2: grok argv 含 prompt 文件路径（非 prompt 内容）"
+if grep -qF "$SENT" "$ALOG"; then check 0 1 "I-2: grok prompt 不应出现在 argv（避免 ARG_MAX）"; else check 0 0 "I-2: grok prompt 不在 argv（避免 ARG_MAX）"; fi
 if grep -qiE 'effort|reasoning' "$ALOG"; then check 0 1 "grok argv 不得含 effort/reasoning (默认模型不支持)"; else check 0 0 "grok argv 不含 effort/reasoning (默认模型不支持)"; fi
 
 # --- dispatch-write（cross-execute 写沙箱）退出码 + 隔离守护 + dry-run argv/cwd 断言 ---
@@ -116,12 +123,12 @@ if [ "$have_git" -eq 1 ]; then
   check 1 $? "dispatch-write worktree 不存在 -> 1"
 
   env CODEX_BIN="$TMP/argcodex" CODEX_HOME="$TMP/home" CROSS_VERIFY_EFFORT=high \
-    ARGLOG="$ALOG" PWDLOG="$PLOG" sh "$SUT" dispatch-write codex-cli "$PF" "$OF" "$WT"
+    ARGLOG="$ALOG" PWDLOG="$PLOG" STDINLOG="$SLOG" sh "$SUT" dispatch-write codex-cli "$PF" "$OF" "$WT"
   grep -qx -- '--sandbox' "$ALOG"; check 0 $? "dispatch-write argv 含 --sandbox"
   grep -qx 'workspace-write' "$ALOG"; check 0 $? "dispatch-write argv 含 workspace-write 沙箱值（准改码）"
   ! grep -qx 'read-only' "$ALOG"; check 0 $? "dispatch-write argv 不含 read-only（写模式不退回只读）"
   grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "dispatch-write argv effort 引号正确"
-  grep -qxF "$SENT" "$ALOG"; check 0 $? "dispatch-write prompt 作单一 argv 原样传入"
+  grep -qxF "$SENT" "$SLOG"; check 0 $? "I-2: dispatch-write prompt 经 stdin 原样传入"
   check "$(cd "$WT" && pwd -P)" "$(cd "$(cat "$PLOG")" && pwd -P)" "dispatch-write 在 worktree 内执行（cwd=worktree）"
 else
   echo "SKIP: dispatch-write 测试（git 不可用或 worktree 创建失败）"

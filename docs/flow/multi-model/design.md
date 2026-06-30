@@ -22,7 +22,7 @@
 
 - **D1 多模型核心归口 `cross-verify`**：把它从「薄咨询技能」升级为「多模型对抗核心」，承载适配器接口 + 派发脚本；A/B/C 三类能力都经它派发。理由：单一归口，避免每技能各搓 bash 重复踩 stdin 挂起 / trusted-dir / 降级的坑。
 - **D2 派发底座 = references 脚本** `skills/cross-verify/references/external-agent.sh`：仿 `verify-citations.sh` 先例的一次性可测脚本。封装①健康检查②codex 派发（`</dev/null` 防挂起、`--sandbox read-only`、`--skip-git-repo-check`、model/effort、超时、stdout 捕获）③结构化裁决契约④降级退出码。理由：遵 C1，不加常驻件。
-- **D3 适配器可插拔**：`docs/flow/cross-verify` 单行写适配器键（`codex-mcp` / `codex-cli`）；`adapters.md` 定义接口（`dispatch` + `healthcheck` 两函数契约）+ Codex 两适配器 + 「接新模型」扩展点。理由：先 Codex 后留口（C5/重心）。
+- **D3 适配器可插拔**：`docs/flow/cross-verify` 单行写适配器键（`codex-cli` / `grok-cli`；旧 `codex-mcp` 别名已去除——脚本层与 codex-cli 行为相同属误导，真 MCP 是 skill 层 in-session 工具）；`adapters.md` 定义接口（`dispatch` + `healthcheck` 两函数契约）+ Codex/Grok 适配器 + 「接新模型」扩展点。理由：先 Codex 后留口（C5/重心）。
 - **D4 纪律升级写进红线**：`flow` + `implement` 的「builder≠verifier」升为「builder 模型 ≠ verifier 模型（异模型可用时）+ 角色轮换 + 审前抹 implementer framing」。理由：把模型独立性钉进纪律层，不只活在一支技能里。
 - **D5 决策门 B 复用 cross-verify**：`plan`（主）/`brainstorm`（可选）门增「跨模型对抗审设计 / 计划」段，经 cross-verify 派发，验证对象从 diff 换成 `design.md` / 方案文本。理由：最小新增面，不为决策门另起技能。
 - **D6 并行执行器 C = 新技能 `cross-execute`（R3，默认关闭）**：把明确子任务派给 Codex 在 git worktree 执行，Claude 编排 + 审查，仿 `subagent-driven-development` 外壳。理由：执行语义与「证伪」正交，单独技能更清晰；调研警示协调成本高 → 默认 opt-in、worktree 强制、≤3 并行甜区、文档写明「何时别用」。
@@ -42,7 +42,7 @@
 
 ## Migration
 
-- **兼容**：未写 `docs/flow/cross-verify` 的项目零变化（现状）。已有 sign / sign-did / hhw 的 opt-in 文件继续有效。
+- **兼容**：未写 `docs/flow/cross-verify` 的项目零变化（现状）。已有 opt-in 文件继续有效——**但若其值是旧 `codex-mcp` 别名，需迁移为 `codex-cli`**（该别名后已从脚本层去除；`flow-doctor` 会对未知/弃用键给出警告而非误报已生效）。
 - **灰度**：按 change 顺序合并，每个 change 独立可用；C（执行器）最后且默认关闭。
 - **数据**：无数据迁移（纯流程文档 + 脚本）。
 

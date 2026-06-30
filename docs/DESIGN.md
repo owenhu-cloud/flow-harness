@@ -17,8 +17,9 @@ Flow 把「按复杂度选择流程深度、完成须附验证证据」固化为
 | 重注入 hook | `hooks/flow-reinject.sh` | `UserPromptSubmit` 每轮注入短纪律；命中敏感面关键词时附档位地板提示；`#skip-flow` 静默放行 |
 | Oracle hook | `hooks/flow-oracle.sh` | `Stop` 时以独立进程跑五道门（完整性/验证/测试数基线/健壮性/覆盖率）裁决完成，失败 `exit 2` 打回 |
 | hook 声明 | `hooks/hooks.json` | 注册上述三支 hook（随插件自动加载） |
+| 体检脚本 | `hooks/flow-doctor.sh` | 按需（非 hook、不自动跑）：在项目 cwd 只读体检 Oracle/B3/B4/cross 接入态 + 外部 agent 健康，退出码 0=Oracle 接入/1=未接入。由 `flow-doctor` 技能调用，也可人/CI 直跑 |
 | 总路由技能 | `skills/flow/SKILL.md` | 评级 rubric、档位流程映射、档位地板、质量红线、升维规则 |
-| 流程技能 | `skills/<name>/SKILL.md` | 19 支技能（见 §6） |
+| 流程技能 | `skills/<name>/SKILL.md` | 20 支技能（见 §6） |
 | 参考与脚本 | `skills/<name>/references/` | 深主题外置、产物示例模板、引用校验器 `verify-citations.sh`（深档硬门） |
 
 技能元数据仅含 `name`（须等于目录名）与 `description`（触发条件 + 双语可检索关键词），由 Claude Code 自动发现，无注册表。`docs/flow/` 下文件是运行时产物，非插件自带配置。
@@ -103,12 +104,13 @@ B2/B3 的通过数比较共用同一函数（bignum 修复只在一处）。Orac
 
 ## 6. 技能体系
 
-19 支技能分五类，各自标明适用档位、流程位置、显式交接，末行继承统一质量红线。
+20 支技能分六类，各自标明适用档位、流程位置、显式交接，末行继承统一质量红线（`skill-lint.sh` 机器校验末行统一红线句 + 双语 description）。
 
 - **总路由** `flow`。
 - **理解项目** `profile`（命令/风格/反模式 → `docs/flow/project.md`）· `codebase-analysis`（内部结构 → `docs/flow/codemap.md`）· `tech-debt-audit`（churn×complexity 热点 → `TECH_DEBT_AUDIT.md`）· `impact-analysis`（变更波及面 → `docs/flow/<change>/impact.md`）。
 - **调研与对齐** `research`（fan-out，浅档/深档+引用校验硬门）· `brainstorm`（硬门）· `plan`（门）。
 - **实现与验证** `implement`（builder/verifier 对抗）· `systematic-debugging`（四阶段根因，阶段三回 implement）· `verify` · `code-review`（独立 reviewer）· `cross-verify`（多模型对抗核心）· `subagent-driven-development`（串行隔离派发）。
+- **体检** `flow-doctor`（体检 Oracle/B3/B4/cross 接入态 + 外部 agent 健康，区分机器强制 vs 纪律；调 `hooks/flow-doctor.sh`）。
 - **交付与收尾** `diagram` · `document` · `finishing-a-development-branch` · `harvest`。
 - **元** `writing-skills`。
 
@@ -119,8 +121,8 @@ B2/B3 的通过数比较共用同一函数（bignum 修复只在一处）。Orac
 把「对抗证伪」一步的执行者从同模型子代理升级为**异模型/外部 agent**（首个适配器 Codex），用模型异质性消除同源盲点——使 builder 模型 ≠ verifier 模型。
 
 - **`cross-verify` 技能**：多轮收敛闭环（派发→摄取裁决→回修→再派，直到无 Critical 或显式接受）；供 `implement`/`code-review` 升级验证、`plan`/`brainstorm` 做跨模型决策门。
-- **opt-in + 降级**：仅当项目 `docs/flow/cross-verify` 声明适配器键（如 `codex-mcp`）才启用；适配器健康检查失败即**显式降级回同模型基线**，不写则零侵入。缺 Codex 不致纪律失效。
-- **派发底座** `skills/cross-verify/references/external-agent.sh`：一次性脚本（仿 `verify-citations.sh` 先例），封装健康检查 / 派发 / 可移植超时 / read-only 沙箱 / 优雅降级。**遵「除三支 hook 外不引入常驻进程或命令行工具」——非 hook、非常驻、无注册**。适配器可插拔，接新模型只需加一个 `case` 分支。
+- **opt-in + 降级**：仅当项目 `docs/flow/cross-verify` 声明适配器键（`codex-cli` / `grok-cli`）才启用；适配器健康检查失败即**显式降级回同模型基线**，不写则零侵入。缺 Codex 不致纪律失效。
+- **派发底座** `skills/cross-verify/references/external-agent.sh`：一次性脚本（仿 `verify-citations.sh` 先例），封装健康检查 / 派发 / 可移植超时 / read-only 沙箱 / 优雅降级。**遵「除三支 hook 外不引入常驻进程或命令行工具」——非 hook、非常驻、无注册**。适配器可插拔，接新模型只需加一个 `case` 分支。**命名诚实**：脚本层只有 CLI 路径，适配器键统一 `codex-cli`（不叫 `codex-mcp`——真正的 in-session MCP 工具由 agent 在 skill 层直接调用，不经本脚本）。prompt 经 stdin/`--prompt-file` 传入（避免长 diff 撞 ARG_MAX）。健康检查只验 binary+auth，**端到端真实链路另由 `external-agent.smoke.sh`（`RUN_E2E=1`，有凭证时跑最小真调用并留证据）验**，补 stub argv 测试覆盖不到的 CLI flag 漂移盲点。
 - **不接入 Oracle**：Stop hook 仍是确定性命令门，往里塞 LLM 会破坏确定性；完成判定仍由 `verify` + Oracle 裁决。
 - **结构机器门** `skills/_lint/skill-lint.sh`：校验技能契约（`name`==目录名、引用的 `references/*` 存在），让 SKILL.md 改动也有可运行验证。
 
