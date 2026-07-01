@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Flow harness 单插件市场：把 Flow 工作流作为原生 Claude Code 插件分发。",
-    "version": "1.8.0"
+    "version": "1.9.0"
   },
   "plugins": [
     {
       "name": "flow",
       "source": "./",
-      "description": "按复杂度路由的工程工作流，纯原生技能实现：判档 + 流程 + 完成必带证据。零 CLI、零常驻进程。"
+      "description": "按复杂度路由的工程工作流，纯原生技能实现：判档 + 流程 + 完成必带证据；多模型时执行可降档、判断与验证不降档。零 CLI、零常驻进程。"
     }
   ]
 }

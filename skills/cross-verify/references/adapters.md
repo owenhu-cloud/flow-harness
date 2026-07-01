@@ -72,6 +72,11 @@ external-agent.sh dispatch codex-cli /tmp/cv-prompt /tmp/cv-out   # 结构化裁
 prompt 内容：change 描述 + 期望行为 + diff + 「对抗证伪，默认怀疑，逐条给 文件:行 + 复现」。
 **健康检查**：`external-agent.sh healthcheck codex-cli`。适用于 MCP 未启用、或想一次性跨模型审查的场景。
 
+**模型档位 / effort**：
+- `dispatch`（只读验证 / plan-review / change-review）使用 `CROSS_VERIFY_EFFORT`，默认 `high`。
+- `dispatch-write`（cross-execute 写沙箱执行）使用 `CROSS_EXECUTE_EFFORT`，默认 `medium`。
+- 不要用执行档位去压低评审档位；完整规则见 `../../flow/references/model-routing.md`。
+
 ## 适配器 3：Grok via CLI（xAI Grok，只读对抗验证）
 
 xAI 的 Grok agentic CLI（`~/.grok/bin/grok`）作只读对抗 verifier。**Grok 无 MCP server 模式**（`grok mcp` 是反向——让 grok 去连别的 MCP），故只走 CLI 派发，不进 `.mcp.json`。

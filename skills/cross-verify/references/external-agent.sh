@@ -28,7 +28,8 @@
 # 接新模型: 在 *_available / cmd_dispatch 的 case 增一个 adapter 分支即可（见 adapters.md 扩展点）。
 #
 # 环境覆盖: CODEX_BIN(默认 codex) · CODEX_HOME(默认 ~/.codex) · GROK_BIN(默认 grok) ·
-#   GROK_HOME(默认 ~/.grok) · CROSS_VERIFY_EFFORT(默认 medium，仅 codex)。
+#   GROK_HOME(默认 ~/.grok) · CROSS_VERIFY_EFFORT(默认 high，仅 codex 只读验证) ·
+#   CROSS_EXECUTE_EFFORT(默认 medium，仅 codex 写沙箱执行)。
 # 注: codex 子命令/flag 随版本漂移，健康检查失败即降级；细节以 `codex exec --help` 为准。
 
 set -eu
@@ -36,7 +37,8 @@ CODEX_BIN="${CODEX_BIN:-codex}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 GROK_BIN="${GROK_BIN:-grok}"
 GROK_HOME="${GROK_HOME:-$HOME/.grok}"
-EFFORT="${CROSS_VERIFY_EFFORT:-medium}"
+VERIFY_EFFORT="${CROSS_VERIFY_EFFORT:-high}"
+EXECUTE_EFFORT="${CROSS_EXECUTE_EFFORT:-medium}"
 TIMEOUT="${CROSS_VERIFY_TIMEOUT:-300}"
 
 die() { printf 'external-agent: %s\n' "$*" >&2; exit 1; }
@@ -104,7 +106,7 @@ cmd_dispatch() {
       # skip-git 容忍非 git 目录；effort 作 TOML 字符串覆盖；超时防卡死；stderr 留作排障。
       _rc=0
       run_timeout "$TIMEOUT" "$CODEX_BIN" exec --sandbox read-only --skip-git-repo-check \
-        -c model_reasoning_effort="\"$EFFORT\"" <"$pf" >"$of" 2>"$_err" || _rc=$?
+        -c model_reasoning_effort="\"$VERIFY_EFFORT\"" <"$pf" >"$of" 2>"$_err" || _rc=$?
       if [ "$_rc" -eq 124 ]; then
         rm -f "$_err"; die "codex dispatch timed out after ${TIMEOUT}s (adapter=$adapter)"
       elif [ "$_rc" -ne 0 ]; then
@@ -158,7 +160,7 @@ cmd_dispatch_write() {
     codex-cli)
       codex_available || exit 3
       _err=$(_mktemp)
-      _effort_arg="model_reasoning_effort=\"$EFFORT\""
+      _effort_arg="model_reasoning_effort=\"$EXECUTE_EFFORT\""
       _rc=0
       # 经 sh -c 切到 worktree 再 exec codex：$1=bin $2=cwd $3=effort-arg。
       # prompt 经 stdin 传入（exec 省略 positional 时从 stdin 读 instructions），避免 ARG_MAX（I-2）；

@@ -28,6 +28,8 @@
 
 **按需技能（不改判档，卡到/到点才插入）**：调试卡住 → `systematic-debugging`；交付前要独立评审 → `code-review`（与 implement 的对抗 verifier 互补）；高风险面想用异模型增强独立性 → `cross-verify`（把 verifier/reviewer 的执行者换成不同模型/外部 agent）；R2/R3 一串任务要逐个隔离派发 → `subagent-driven-development`（R3 且想把执行交给**异模型在隔离 worktree** 跑、Claude 退到审 diff 位 → `cross-execute`，默认关闭、opt-in）；change 收尾合并/PR/丢弃 → `finishing-a-development-branch`。
 
+**模型路由**：执行者可低一档，判断与验证不降档。完整规则 → `model-routing.md`。
+
 **分析类（理解优先于动手，多在 plan 前）**：陌生/大库先 `codebase-analysis` 画内部结构图；改前用 `impact-analysis` 算波及面定测试范围；要系统性盘技术债用 `tech-debt-audit`。三者只读、只产结构化制品，不测命令（那是 `profile`）、不查外网（那是 `research`）。
 
 **已折叠（不另设技能，避免重叠）**：规格澄清 / spec-clarify → `brainstorm` 的苏格拉底澄清；架构 / 设计评估 → `plan` 的 Decisions/Risks-Tradeoffs + `document`；安全审查 → Claude Code 原生 `/security-review` 命令；深度调研 → `research` 的「深档」。

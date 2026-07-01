@@ -100,6 +100,8 @@ R2/R3 会在两处**停下等你确认**（brainstorm 方向门、plan 设计门
 | `code-review` | 交付 / 合并前要第三方视角 | 派独立 reviewer 子代理用模板 + diff 评审，按 Critical/Important/Minor 分级；忽略评审须写技术理由。与 implement 的对抗 verifier 互补（review 偏可读性/设计，verifier 偏证伪正确性） |
 | `subagent-driven-development` | R2/R3 一串任务要逐个隔离落地 | 每个任务派 fresh 子代理（防上下文串味）+ spec/质量双评审 + 按难度分模型 |
 
+**模型路由**：执行者可以降一档，判断与验证不降档。具体说，planner/orchestrator、方案审、diff review、verifier 用最强可用模型；只有已拆清楚、彼此独立、可机检验收的 executor 默认低一档。Codex CLI 适配器中 `CROSS_VERIFY_EFFORT` 默认 `high`，`CROSS_EXECUTE_EFFORT` 默认 `medium`；Claude Code 子代理通过 brief 标明执行/评审档位意图。
+
 ### 交付与收尾
 
 | 技能 | 何时 | 给你什么 |

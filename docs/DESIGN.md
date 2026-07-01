@@ -122,7 +122,8 @@ B2/B3 的通过数比较共用同一函数（bignum 修复只在一处）。Orac
 
 - **`cross-verify` 技能**：多轮收敛闭环（派发→摄取裁决→回修→再派，直到无 Critical 或显式接受）；供 `implement`/`code-review` 升级验证、`plan`/`brainstorm` 做跨模型决策门。
 - **opt-in + 降级**：仅当项目 `docs/flow/cross-verify` 声明适配器键（`codex-cli` / `grok-cli`）才启用；适配器健康检查失败即**显式降级回同模型基线**，不写则零侵入。缺 Codex 不致纪律失效。
-- **派发底座** `skills/cross-verify/references/external-agent.sh`：一次性脚本（仿 `verify-citations.sh` 先例），封装健康检查 / 派发 / 可移植超时 / read-only 沙箱 / 优雅降级。**遵「除三支 hook 外不引入常驻进程或命令行工具」——非 hook、非常驻、无注册**。适配器可插拔，接新模型只需加一个 `case` 分支。**命名诚实**：脚本层只有 CLI 路径，适配器键统一 `codex-cli`（不叫 `codex-mcp`——真正的 in-session MCP 工具由 agent 在 skill 层直接调用，不经本脚本）。prompt 经 stdin/`--prompt-file` 传入（避免长 diff 撞 ARG_MAX）。健康检查只验 binary+auth，**端到端真实链路另由 `external-agent.smoke.sh`（`RUN_E2E=1`，有凭证时跑最小真调用并留证据）验**，补 stub argv 测试覆盖不到的 CLI flag 漂移盲点。
+- **派发底座** `skills/cross-verify/references/external-agent.sh`：一次性脚本（仿 `verify-citations.sh` 先例），封装健康检查 / 派发 / 可移植超时 / read-only 沙箱 / workspace-write 沙箱 / 优雅降级。**遵「除三支 hook 外不引入常驻进程或命令行工具」——非 hook、非常驻、无注册**。适配器可插拔，接新模型只需加一个 `case` 分支。**命名诚实**：脚本层只有 CLI 路径，适配器键统一 `codex-cli`（不叫 `codex-mcp`——真正的 in-session MCP 工具由 agent 在 skill 层直接调用，不经本脚本）。prompt 经 stdin/`--prompt-file` 传入（避免长 diff 撞 ARG_MAX）。健康检查只验 binary+auth，**端到端真实链路另由 `external-agent.smoke.sh`（`RUN_E2E=1`，有凭证时跑最小真调用并留证据）验**，补 stub argv 测试覆盖不到的 CLI flag 漂移盲点。
+- **模型路由**：按角色而非工具品牌定档。planner/orchestrator、plan-review、diff review、verifier 使用最强可用模型；只在任务已拆清楚、独立、可机检时让 executor 低一档执行。Codex CLI 路径中 `dispatch` 使用 `CROSS_VERIFY_EFFORT`（默认 `high`），`dispatch-write` 使用 `CROSS_EXECUTE_EFFORT`（默认 `medium`）。完整规则见 `skills/flow/references/model-routing.md`。
 - **不接入 Oracle**：Stop hook 仍是确定性命令门，往里塞 LLM 会破坏确定性；完成判定仍由 `verify` + Oracle 裁决。
 - **结构机器门** `skills/_lint/skill-lint.sh`：校验技能契约（`name`==目录名、引用的 `references/*` 存在），让 SKILL.md 改动也有可运行验证。
 

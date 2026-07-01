@@ -67,6 +67,9 @@ grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "argv effort 引�
 grep -qxF "$SENT" "$SLOG"; check 0 $? "I-2: prompt 经 stdin 原样传入、无分词无注入 (M5 守护)"
 if grep -qF "$SENT" "$ALOG"; then check 0 1 "I-2: prompt 不应出现在 argv（避免 ARG_MAX）"; else check 0 0 "I-2: prompt 不在 argv（避免 ARG_MAX）"; fi
 
+env CODEX_BIN="$TMP/argcodex" CODEX_HOME="$TMP/home" ARGLOG="$ALOG" sh "$SUT" dispatch codex-cli "$PF" "$OF"
+grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "dispatch 默认 high effort（评审/验证不降档）"
+
 # --- grok-cli 适配器（headless 只读 dispatch；无 dispatch-write）---
 # 复用 argcodex 作 grok stub（同样把 argv 写 ARGLOG、打印 canned 裁决）；GROK_HOME 控认证在场。
 GH="$TMP/grokhome"; mkdir -p "$GH"; : > "$GH/auth.json"
@@ -127,9 +130,13 @@ if [ "$have_git" -eq 1 ]; then
   grep -qx -- '--sandbox' "$ALOG"; check 0 $? "dispatch-write argv 含 --sandbox"
   grep -qx 'workspace-write' "$ALOG"; check 0 $? "dispatch-write argv 含 workspace-write 沙箱值（准改码）"
   ! grep -qx 'read-only' "$ALOG"; check 0 $? "dispatch-write argv 不含 read-only（写模式不退回只读）"
-  grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "dispatch-write argv effort 引号正确"
+  grep -qxF 'model_reasoning_effort="medium"' "$ALOG"; check 0 $? "dispatch-write 默认 medium effort（执行者低一档，且不受 CROSS_VERIFY_EFFORT 影响）"
   grep -qxF "$SENT" "$SLOG"; check 0 $? "I-2: dispatch-write prompt 经 stdin 原样传入"
   check "$(cd "$WT" && pwd -P)" "$(cd "$(cat "$PLOG")" && pwd -P)" "dispatch-write 在 worktree 内执行（cwd=worktree）"
+
+  env CODEX_BIN="$TMP/argcodex" CODEX_HOME="$TMP/home" CROSS_EXECUTE_EFFORT=high \
+    ARGLOG="$ALOG" sh "$SUT" dispatch-write codex-cli "$PF" "$OF" "$WT"
+  grep -qxF 'model_reasoning_effort="high"' "$ALOG"; check 0 $? "dispatch-write 可由 CROSS_EXECUTE_EFFORT 单独上调"
 else
   echo "SKIP: dispatch-write 测试（git 不可用或 worktree 创建失败）"
 fi

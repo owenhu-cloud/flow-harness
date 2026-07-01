@@ -37,6 +37,8 @@ XV=$(read1 "$FLOW/cross-verify")
 XE=$(read1 "$FLOW/cross-execute")
 TC=$(read1 "$FLOW/test-count")
 RC=$(read1 "$FLOW/robustness-count")
+CV_EFFORT=${CROSS_VERIFY_EFFORT:-high}
+CE_EFFORT=${CROSS_EXECUTE_EFFORT:-medium}
 
 say '================ Flow Doctor ================'
 say "项目: $(pwd)"
@@ -87,6 +89,7 @@ if [ -n "$XV" ]; then
   case "$XV" in
     codex-cli|grok-cli)
       say "  cross-verify   ✅ opt-in   适配器键: $XV"
+      [ "$XV" = codex-cli ] && say "    └ Codex verify effort: ${CV_EFFORT}（评审/验证默认不降档；env CROSS_VERIFY_EFFORT 可覆盖）"
       if [ -f "$EXT" ]; then
         if sh "$EXT" healthcheck "$XV" >/dev/null 2>&1; then say "    └ $XV  ✅ available"
         else say "    └ $XV  ❌ 降级（binary 或 auth.json 缺）→ 会回退同模型基线"; fi
@@ -105,7 +108,9 @@ else
 fi
 if [ -f "$FLOW/cross-execute" ]; then
   case "$XE" in
-    codex-cli) say '  cross-execute  ✅ opt-in   适配器键: codex-cli（异模型隔离 worktree 执行）' ;;
+    codex-cli)
+      say '  cross-execute  ✅ opt-in   适配器键: codex-cli（异模型隔离 worktree 执行）'
+      say "    └ Codex execute effort: ${CE_EFFORT}（执行默认低一档；env CROSS_EXECUTE_EFFORT 可覆盖）" ;;
     grok-cli)  say '  cross-execute  ⚠️ opt-in 但 grok-cli 未实现 dispatch-write（写沙箱）→ 派发会 unknown adapter；用 codex-cli' ;;
     '')        say '  cross-execute  ⚠️ opt-in 但文件为空/仅注释 → 未声明适配器键（应写 codex-cli）' ;;
     *)         say "  cross-execute  ⚠️ opt-in 但适配器键 '$XE' 未知（写沙箱仅支持 codex-cli）" ;;
