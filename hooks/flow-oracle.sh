@@ -267,7 +267,10 @@ check_count_baseline() {
   fi
   if [ -f "$_cf" ]; then
     _base=$(grep -oE '[0-9]+' "$_cf" | head -n1)
-    [ -n "$_base" ] || return 0                     # 基线无数字（垃圾文件）→ 跳过比较（保守）
+    if [ -z "$_base" ]; then                        # 基线文件无数字（垃圾/损坏/被提交清零以绕过计数门）
+      printf '%s\n' "$_cur" > "$_cf"                 # → 视为无有效基线，用本轮可解析计数【重建】，不再静默放行
+      return 0                                       # （否则垃圾基线让计数门永久失效——Codex 审计 bug 2a）
+    fi
     if ! _plausible_count "$_base"; then
       printf '[Flow Oracle] %s未通过：基线值 %s 超出可信整数域（>18 位），疑被篡改/损坏。\n' "$_label" "$_base" >&2
       printf '请人工核对并修正 %s（应为正常的通过测试数），再收尾。\n' "$_cf" >&2

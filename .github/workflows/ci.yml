@@ -1,0 +1,43 @@
+name: CI
+
+# 这个「质量/验证」harness 自己也必须过测试门——否则名实矛盾（完成必带新鲜测试输出）。
+# 跑与 Stop Oracle 相同的 verify-cmd 套件 + skill-lint + POSIX 语法检查；shellcheck 仅信息性。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: POSIX 语法检查 (sh -n 全部 *.sh)
+        run: |
+          set -e
+          for f in $(find . -path ./.git -prune -o -name '*.sh' -print); do
+            sh -n "$f"
+          done
+          echo "sh -n OK"
+
+      - name: 技能结构 lint (skill-lint --all)
+        run: sh skills/_lint/skill-lint.sh --all
+
+      - name: 测试套件 (Oracle verify-cmd 套件 + schema 金丝雀)
+        run: |
+          set -e
+          for t in \
+            hooks/flow-hooks.test.sh \
+            hooks/flow-oracle.test.sh \
+            hooks/flow-doctor.test.sh \
+            hooks/schema-canary.test.sh \
+            skills/cross-verify/references/external-agent.test.sh \
+            skills/research/references/verify-citations.test.sh; do
+            echo "== $t =="
+            sh "$t"
+          done
+
+      - name: shellcheck (信息性，不阻断)
+        continue-on-error: true
+        run: shellcheck -S warning hooks/*.sh skills/*/references/*.sh skills/_lint/*.sh

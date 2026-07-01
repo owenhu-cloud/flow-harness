@@ -13,7 +13,7 @@
 | 生态 | 看 | 典型命令 |
 |---|---|---|
 | Node | package.json `scripts` | `npm test` / `pnpm test` / `yarn test`、`npm run build`、`npm run lint` |
-| Go | go.mod、Makefile | `go test ./...`、`go build ./...`、`go vet ./...` |
+| Go | go.mod、Makefile | `go test -v ./...`、`go build ./...`、`go vet ./...`（**必须 `-v`**：纯 `go test ./...` 只输出 `ok pkg` 无逐条 `--- PASS:`，Oracle B2 计数门解析不出通过数 → 对该项目永久休眠；`-v` 才有逐条可数） |
 | Rust | Cargo.toml | `cargo test`、`cargo build`、`cargo clippy` |
 | Python | pyproject.toml / tox.ini / Makefile | `pytest`、`ruff check`、`mypy` |
 | 多语言 | Makefile / Justfile | `make test` / `make check` |

@@ -1,3 +1,3 @@
 # flow-harness 自测命令（供 Stop hook 独立 Oracle 裁决；纳入版本控制、人审其变更）。
 # 跑全部 *.test.sh，任一失败即非零退出。Oracle 取首条非注释行作为验证命令。
-for t in hooks/flow-hooks.test.sh hooks/flow-oracle.test.sh skills/cross-verify/references/external-agent.test.sh skills/research/references/verify-citations.test.sh; do echo "== $t =="; sh "$t" || exit 1; done
+for t in hooks/flow-hooks.test.sh hooks/flow-oracle.test.sh hooks/flow-doctor.test.sh hooks/schema-canary.test.sh skills/cross-verify/references/external-agent.test.sh skills/research/references/verify-citations.test.sh; do echo "== $t =="; sh "$t" || exit 1; done

@@ -4,6 +4,8 @@
 
 Flow 在执行任何工程任务前先对其复杂度评级（R0–R3），据此选择相应深度的流程：低复杂度任务直接执行，高复杂度任务依次经过方向对齐、设计、对抗实现、验证与交付。所有能力以技能（`SKILL.md`）形式提供，由 agent 通过原生 `Skill` / `Task` / `TodoWrite` / plan mode 调度；三支 hook 提供机制兜底，其中独立 Oracle 在「完成」声明处做机器级裁决。
 
+> **诚实的生效边界（先读这段，别高估保护强度）**：Oracle 的机器门（7 道，含意图门 A1/技能门 A2）**仅在项目写入 `docs/flow/verify-cmd` 后才生效**；未写则机器强制部分**整体休眠**，你拿到的是「提示词纪律 + 每轮重注入」这一层。装了插件 ≠ 机器门在守——用 `flow-doctor` 看这个项目里到底什么在真生效。首次进入项目用 `profile` 探测并写入 `verify-cmd`（它拒绝写没实跑过的假命令）才激活机器门。本仓自身有 **CI**（`.github/workflows/ci.yml`）在 push/PR 跑全部测试门 + lint + 语法检查——质量 harness 自己也吃狗粮。
+
 - **详细架构与技术方案** → [`docs/DESIGN.md`](docs/DESIGN.md)
 - **面向用户的使用手册** → [`docs/MANUAL.md`](docs/MANUAL.md)
 

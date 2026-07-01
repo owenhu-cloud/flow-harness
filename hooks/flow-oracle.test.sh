@@ -201,6 +201,29 @@ git add -A; git commit -qm base
 run "count drop + committed override → pass" 0 "$NOSTOP"
 assert_file "baseline refreshed to 2" docs/flow/test-count 2
 
+# B2 bug 2a（Codex 审计 + Claude 复现）：已提交【垃圾/非数字基线】不该让计数门永久失效——
+# 本轮可解析计数应【重建】基线，而非静默 return 0 放行（否则删测试崩溃永远拦不住）。
+newdir cB2a; gitinit
+printf 'cat result.txt; true\n' > docs/flow/verify-cmd
+printf '10 passed\n' > result.txt
+printf 'garbage\n' > docs/flow/test-count        # 基线存在但非数字（手滑写坏 / 攻击提交清零）
+git add -A; git commit -qm base
+run "garbage baseline + parseable count → re-establish (pass)" 0 "$NOSTOP"
+assert_file "garbage baseline re-established to 10" docs/flow/test-count 10
+printf '1 passed\n' > result.txt                 # 测试崩溃 10→1，verify-cmd 不动（不触发 A0 燃料门）
+run "after re-establish, crash 10→1 → block" 2 "$NOSTOP"
+
+# B2 bug 2b（Codex 审计）：Go 计数门需 `go test -v`（逐条 --- PASS:）才能建基线——锁定该行为并记录 profile 已改推荐 -v。
+# 纯 `go test ./...` 只有 `ok pkg`、无逐条 → extract_count 为空 → B2 对该项目休眠（documented limitation）。
+newdir cB2b1; setcmd "printf 'ok  \\tmypkg\\t0.1s\\nPASS\\n'"
+run "plain 'go test ./...' output (no --- PASS:) → pass, no count" 0 "$NOSTOP"
+if [ -f docs/flow/test-count ]; then FAIL=$((FAIL+1)); printf 'FAIL  cB2b1: plain go should NOT establish a baseline\n'
+else PASS=$((PASS+1)); printf 'PASS  plain go test → no baseline (documents why profile now recommends -v)\n'; fi
+# `go test -v ./...` 有逐条 --- PASS: → B2 建立基线（计数门对 Go 激活）
+newdir cB2b2; setcmd "printf -- '--- PASS: TestA (0.0s)\\n--- PASS: TestB (0.0s)\\nPASS\\nok  \\tmypkg\\t0.1s\\n'"
+run "'go test -v' output (--- PASS:) → count established" 0 "$NOSTOP"
+assert_file "go -v establishes baseline=2" docs/flow/test-count 2
+
 # 删 docs/flow/test-count 不被当成"删测试文件"（A3 排除 docs/flow），但【已提交基线被删】会被
 # C-1/A0c 拦（清零地板绕过）。故此处期望 block——并非 A3 误报，是 C-1 防绕过（见 cC1d 注释）。
 newdir cB9; setcmd 'true'; gitinit
